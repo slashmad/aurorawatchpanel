@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="sv">
+	<head>
+		<meta charset="UTF-8">
+		<title>Aurora Watch Panel</title>
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+
+		<link rel="icon" href="https://slashmad.com/favicon.ico" type="image/x-icon">
+
+		<link rel="stylesheet" href="/static/css/style.css">
+		<link rel="stylesheet" href="/static/css/flatpickr.min.css">
+
+		<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+		<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
+
+		<script src="https://cdn.jsdelivr.net/npm/flatpickr" defer></script>
+		<script src="https://code.highcharts.com/highcharts.js" defer></script>
+		<script src="https://code.highcharts.com/highcharts-more.js" defer></script>
+		<script src="https://code.highcharts.com/modules/solid-gauge.js" defer></script>
+		<script src="https://code.highcharts.com/modules/exporting.js" defer></script>
+		<script src="https://code.highcharts.com/modules/export-data.js" defer></script>
+		<script src="https://code.highcharts.com/modules/accessibility.js" defer></script>
+		<script src="https://code.highcharts.com/modules/annotations.js" defer></script>
+		<script src="https://unpkg.com/leaflet/dist/leaflet.js" defer></script>
+
+		<script src="/static/js/coronal_hole_calendar.js"></script>
+
+		<script src="/static/js/main.min.js" type="module" defer></script>
+		<script>
+		  // Reload the page after 60 minutes (60 * 60 * 1000 ms = 3,600,000 ms)
+		  setTimeout(function() {
+			location.reload();
+		  }, 3600000);
+		</script>
+
+	</head>
+<body>
+  <nav id="leftbar">
+    <button class="leftbar-btn" data-section="location" title="Location">
+      <i class="fa-solid fa-location-dot glow-icon" aria-hidden="true"></i>
+    </button>
+    <button class="leftbar-btn" data-section="cloudmap" title="Cloudmap">
+      <i class="fa-solid fa-cloud glow-icon" aria-hidden="true"></i>
+    </button>
+    <button class="leftbar-btn" data-section="lightpollution" title="Light Pollution">
+      <i class="fa-solid fa-city glow-icon" aria-hidden="true"></i>
+    </button>
+    <button class="leftbar-btn" data-section="objects-in-sky" title="Objects in the Sky">
+       <i class="fa-solid fa-compass glow-icon" aria-hidden="true"></i>
+    </button>
+    <button class="leftbar-btn" data-section="objects-in-sky-graph" title="Objects in the Sky">
+       <i class="fa-solid fa-globe glow-icon" aria-hidden="true"></i>
+    </button>
+    <button class="leftbar-btn" data-section="solarwind" title="Solarwind">
+       <i class="fa-solid fa-gauge-high glow-icon" aria-hidden="true"></i>
+    </button>
+    <button class="leftbar-btn" data-section="magnetometer" title="Magnetometer">
+       <i class="fa-solid fa-magnet glow-icon" aria-hidden="true"></i>
+    </button>
+    <button class="leftbar-btn" data-section="solar" title="Solar">
+      <i class="fa-solid fa-sun glow-icon" aria-hidden="true"></i>
+    </button>
+    <button class="leftbar-btn" data-section="noaa" title="NOAA">
+      <img src="/svg/noaa_logo.svg" class="glow-icon" alt="NOAA" class="icon">
+    </button>
+  </nav>
+
+<div id="dashboard-multipanel" class="dashboard-multipanel">
+  <div class="dashboard-col" id="dashboard-location"></div>
+  <div class="dashboard-col" id="dashboard-solarwind"></div>
+  <div class="dashboard-col" id="dashboard-magnetometer"></div>
+  <div class="dashboard-col" id="dashboard-solar"></div>
+</div>
+
+<div class="tab-panels-wrapper">
+  <section class="tab-panel active" data-section="location">
+	<div class="card card-modern location-astro-combined">
+	  <div class="location-astro-flex">
+		<!-- Location till vänster -->
+		<div class="location-astro-location">
+		  <div class="card-header card-header-modern location-modern-header">
+			<i class="fa-solid fa-location-dot"></i>
+			<span>Location</span>
+		  </div>
+		  <div class="location-modern-search">
+			<input type="text" id="location-search" class="location-modern-search-input" placeholder="Search…" autocomplete="off">
+			<ul id="location-suggestions" class="location-modern-suggestions hidden"></ul>
+			<button id="detect-location-btn" class="detect-location-btn" title="Use device location">
+			  <i class="fa fa-crosshairs"></i> Detect
+			</button>
+		  </div>
+		  <p id="location-info" class="location-modern-info"></p>
+			<div class="moon-row location-modern-moon-row">
+			  <img id="moon-icon" src="" alt="Moon Image from NASA" class="location-modern-moon-icon" />
+			  <span id="moon-phase-info" class="location-modern-moon-phase"></span>
+			</div>
+		</div>
+		<!-- Sun & Moon till höger -->
+		<div class="location-astro-astro">
+		  <div class="card-header card-header-modern location-modern-header">
+			<i class="fa-solid fa-sun"></i> Sun & Moon <i class="fa-solid fa-moon"></i>
+		  </div>
+		  <div class="astro-content astro-content-modern location-modern-astro-content">
+			<div><span class="label">Sunrise:</span><span id="sunrise-info" class="sunmoonvalue">–</span></div>
+			<div><span class="label">Dawn:</span><span id="dawn-info" class="sunmoonvalue">–</span></div>
+			<div><span class="label">Dusk:</span><span id="dusk-info" class="sunmoonvalue">–</span></div>
+			<div><span class="label">Sunset:</span><span id="sunset-info" class="sunmoonvalue">–</span></div>
+			<div><span class="label">Golden hour:</span><span id="golden-hour-info" class="sunmoonvalue">–</span></div>
+			<div><span class="label">Darkness:</span><span id="nightlength-info" class="sunmoonvalue">–</span></div>
+			<div><span class="label">Sun height:</span><span id="sunheight-info" class="sunmoonvalue">–</span></div>
+			<div><span class="label">Moon height:</span><span id="moon-alt-info" class="sunmoonvalue">–</span></div>
+			<div><span class="label">Next full moon:</span><span id="next-fullmoon-info" class="sunmoonvalue">–</span></div>
+		  </div>
+		</div>
+	  </div>
+	</div>
+
+	<div class="card card-modern weather-modern-combined" id="weather-card-container">
+	  <div class="weather-modern-header card-header card-header-modern">
+		<i class="fa-solid fa-cloud-sun"></i>
+		<span>Weather</span>
+	  </div>
+	  <div class="weather-modern-content" id="weather-card-scroll"></div>
+	</div>
+
+	<div class="card card-modern gauge-modern-combined" id="double-gauge-card">
+	  <div class="gauge-modern-flex">
+		<div class="gauge-modern-header card-header card-header-modern">
+		  <i class="fa-solid fa-bolt"></i>
+		  <span>KP & HPO Index (real-time)</span>
+		</div>
+		<div class="gauge-modern-content">
+		  <div id="double-gauge"></div>
+		</div>
+	  </div>
+	</div>
+
+	<div class="card card-modern oval-modern-combined" id="aurora-oval-card">
+	  <div class="oval-modern-flex">
+		<div class="oval-modern-header card-header card-header-modern aurora-dropdown-toggle" style="cursor:pointer;">
+		  <i class="fa-solid fa-globe"></i>
+		  <span>Aurora-Oval map</span>
+		  <span id="aurora-dropdown-arrow" class="oval-modern-arrow">▼</span>
+		</div>
+		<div class="oval-modern-content" id="aurora-map-container" style="position: relative;">
+		  <img src="" alt="Aurora Oval" id="aurora-oval-img" />
+		  <div id="aurora-slider-overlay">
+			<input type="range" id="aurora-slider" min="0" max="0" step="1" value="0">
+		  </div>
+		  <div id="aurora-oval-info" class="oval-modern-info" style="display:none;">
+			<div id="aurora-hp-info"></div>
+		  </div>
+		</div>
+	  </div>
+	</div>
+
+	<div class="card card-modern conditions-modern-combined" id="aurora-conditions">
+	  <div class="conditions-modern-flex">
+		<div class="conditions-modern-header card-header card-header-modern">
+		  <i class="fa-solid fa-circle-info"></i>
+		  <span>Aurora/Solar Forecast & Events</span>
+		</div>
+		<div class="conditions-modern-content">
+		  <div id="cond-alert" class="conditions-alert"></div>
+		  <div class="aurora-conditions-row">
+			<div id="aurora-headsup" class="aurora-headsup-row"></div>
+			<div id="solar-events-list" class="aurora-headsup-row"></div>
+		  </div>
+		  <div class="solar-quicklinks-row">
+			<div class="solar-quicklinks-line">
+			  <button class="solar-quicklink-btn" type="button" data-quicklink="huxt">HUXt</button>
+			  <button class="solar-quicklink-btn" type="button" data-quicklink="enlil">WSA-ENLIL</button>
+			  <button class="solar-quicklink-btn" type="button" data-quicklink="synoptic">Synoptic Map</button>
+			</div>
+			<div class="solar-quicklinks-line">
+			  <button class="solar-quicklink-btn" type="button" data-quicklink="sdo193">SDO193</button>
+			  <button class="solar-quicklink-btn" type="button" data-quicklink="sdo304">SDO304</button>
+			  <button class="solar-quicklink-btn" type="button" data-quicklink="ccor1">CCOR1</button>
+			  <button class="solar-quicklink-btn" type="button" data-quicklink="lasco-c2">LASCO C2</button>
+			  <button class="solar-quicklink-btn" type="button" data-quicklink="lasco-c3">LASCO C3</button>
+			</div>
+		  </div>
+	    </div>
+	  </div>
+  </div>
+
+<!-- index.html (around line 173) -->
+<div class="card card-modern allsky-current-card" data-allsky-cam="ytterboda">
+  <div class="conditions-modern-flex">
+    <div class="conditions-modern-header card-header card-header-modern">
+      <i class="fa-solid fa-camera"></i>
+      <span class="allsky-title">AllSky Ytterboda, Umeå</span>
+
+      <span class="header-spacer"></span>
+      <span class="header-spacer"></span>
+
+      <button
+        class="map-btn allsky-weather-btn"
+        type="button"
+        title="Weather station (Ecowitt)"
+        data-allsky-only="ytterboda"
+        data-iframe-url="https://www.ecowitt.net/home/share?authorize=VVWV7D&device_id=THJoL09QMk4yYmVIOGlGWW8rWWVQUT09"
+      >
+        <i class="fa-solid fa-cloud-sun"></i>
+        Weather
+      </button>
+
+      <button
+        class="map-btn allsky-timelapse-btn"
+        type="button"
+        title="AllSky timelapse archive"
+        data-allsky-only="ytterboda"
+        data-iframe-url="/allsky/browser"
+      >
+        <i class="fa-solid fa-film"></i>
+        Timelapse
+      </button>
+
+			<button
+				class="map-btn allsky-timelapse-btn"
+				type="button"
+				title="Lyckebo timelapse archive"
+				data-allsky-only="tavelsjo"
+				data-iframe-url="/lyckebo/browser"
+			>
+				<i class="fa-solid fa-film"></i>
+				Timelapse
+			</button>
+
+      <button
+        class="map-btn allsky-replay-btn"
+        type="button"
+        title="Replay day (sync data + images)"
+      >
+        <i class="fa-solid fa-circle-play"></i>
+        Replay
+      </button>
+    </div>
+
+    <div class="allsky-current-body">
+		<div class="allsky-tabs allsky-tabs-body" role="tablist" aria-label="AllSky cameras">
+			<button class="map-btn allsky-tab-btn active" type="button" role="tab" aria-selected="true" data-cam="ytterboda">Ytterboda</button>
+			<button class="map-btn allsky-tab-btn" type="button" role="tab" aria-selected="false" data-cam="tavelsjo">Tavelsjö</button>
+			<button class="map-btn allsky-tab-btn" type="button" role="tab" aria-selected="false" data-cam="kiruna">Kiruna</button>
+		</div>
+      <img class="allsky-current-img" alt="AllSky latest image" loading="lazy">
+      <div class="allsky-thumb-row">
+        <div class="allsky-thumb-strip" aria-label="AllSky thumbnails"></div>
+      </div>
+      <div class="allsky-current-status"></div>
+    </div>
+  </div>
+</div>
+
+
+	<div class="card card-modern" id="coronal-hole-card">
+	  <div class="coronal-hole-modern card-header card-header-modern">
+		<i class="fa-solid fa-circle-dot"></i>
+		<span>Current Coronal Hole</span>
+		<button id="btn-open-ch-calendar" class="btn">Coronal Hole Calendar</button>
+	  </div>
+	  <div id="coronal-hole-content"></div>
+	  <div id="coronal-hole-controls"></div>
+	</div>
+
+	<div class="card card-modern" id="sunspot-card">
+	  <div class="sunspots-modern card-header card-header-modern">
+		<i class="fa-solid fa-circle-dot"></i>
+		<span>Current Sunspot Regions</span>
+	  </div>
+	  <div id="sunspot-controls" style="margin-bottom: 0.8em;"></div>
+	  <div id="sunspot-content"></div>
+	</div>
+
+  </section>
+<section class="tab-panel" data-section="cloudmap">
+  <div class="cloudmap-iframe" id="windy-iframe-anchor"></div>
+</section>
+<section class="tab-panel" data-section="lightpollution">
+  <div class="lightpollution-iframe" id="lightpollution-iframe-anchor"></div>
+</section>
+<section class="tab-panel" data-section="objects-in-sky">
+  <div class="azimuth-map-container" id="astro-azimuth-embed">
+    <div class="astro-azimuth-controls"></div>
+    <div id="astro-azimuth-map"></div>
+    <div class="astro-azimuth-times"></div>
+  </div>
+</section>
+<section class="tab-panel" data-section="objects-in-sky-graph">
+  <div class="card card-modern astro-mapgraph-card">
+    <div class="card-header card-header-modern astro-mapgraph-header">
+      <div class="astro-mapgraph-title"><i class="fa-solid fa-chart-line"></i> Objects Altitude Graph</div>
+    </div>
+    <div id="astro-master-graph-embed"></div>
+  </div>
+</section>
+
+  <section class="tab-panel" data-section="solarwind">
+<!-- ---- NOAA Speed ---- -->
+			<div class="card card-modern solarwind-modern-card">
+				<div class="solarwind-modern-header card-header card-header-modern flex-header">
+					<i class="fa-solid fa-wind"></i><span>Speed</span>
+					<span class="info-tooltip" data-tooltip="
+					<b>Solar wind speed is the velocity at which charged particles from the Sun flow past Earth.</b>
+
+					<b>< 400 km/s</b>: Calm solar wind. Usually quiet geomagnetic field, low aurora probability.
+
+					<b>400–600 km/s</b>: Elevated speed. Typical of coronal holes; increased risk for substorms, especially if sustained.
+
+					<b>600–700 km/s</b>: High speed. Frequent during high-speed streams or solar storms. Geomagnetic activity increases, aurora more likely.
+
+					<b>700–800 km/s</b>: Very high speed. Often seen during strong coronal mass ejections (CMEs) or major coronal holes. Storms are likely.
+
+					<b>800–1000 km/s</b>: Extreme speed. Indicates a major solar event is impacting Earth. Geomagnetic storms and aurora can reach much lower latitudes.
+
+					<b>> 1000 km/s</b>: Exceptionally rare. Usually means a very fast CME is hitting. Severe storms possible, with aurora far south.
+
+					<b>In general:</b> The faster the wind, the greater the energy available to disturb Earth’s magnetic field, especially if B<sub>z</sub> is also negative.
+					">
+					<i class="fa fa-circle-info"></i>
+					</span>
+					<span id="sw-speed-current" class="current-value"></span>
+					<span class="header-spacer"></span>
+						<select id="sw-speed-range">
+							<option value="1">1h</option>
+							<option value="3" selected>3h</option>
+							<option value="6">6h</option>
+							<option value="12">12h</option>
+							<option value="24">24h</option>
+						</select>
+				</div>
+				<div id="sw-speed-chart" class="sw-canvas"></div>
+			</div>
+
+<!-- ---- NOAA Density ---- -->
+			<div class="card card-modern solarwind-modern-card">
+				<div class="solarwind-modern-header card-header card-header-modern flex-header">
+					<i class="fa-solid fa-droplet"></i><span>Density</span>
+					<span class="info-tooltip" data-tooltip="
+						<b>Solar wind density is the number of charged particles (mainly protons) in each cubic centimeter of solar wind.</b>
+
+						<b>< 5 p/cm³: Very low density.</b> Typically quiet; not much effect unless wind speed is also high.
+
+						<b>5–15 p/cm³: Normal background density.</b> May support minor activity if B<sub>z</sub> is southward.
+
+						<b>15–25 p/cm³: Moderate.</b> Enhanced potential for geomagnetic effects, especially if combined with high speed or negative B<sub>z</sub>.
+
+						<b>25–40 p/cm³: High density.</b> Often signals an approaching shock front (like a CME). Sudden increases (“density spikes”) can trigger abrupt geomagnetic storms.
+
+						<b>40–70 p/cm³: Very high.</b> Sudden, strong geomagnetic responses likely.
+
+						<b>> 70 p/cm³: Extreme density.</b> Rare outside strong CME impacts; can cause strong ground-level magnetic swings and intense aurora.
+
+						<b>Note:</b> Sudden jumps in density are often the first sign of an incoming solar storm. High density combined with high speed and negative B<sub>z</sub> = perfect aurora conditions.
+						">
+						<i class="fa fa-circle-info"></i>
+					</span>
+					<span id="sw-density-current" class="current-value"></span>
+					<span class="header-spacer"></span>
+						<select id="sw-density-range">
+							<option value="1">1h</option>
+							<option value="3" selected>3h</option>
+							<option value="6">6h</option>
+							<option value="12">12h</option>
+							<option value="24">24h</option>
+						</select>
+				</div>
+				<div id="sw-density-chart" class="sw-canvas"></div>
+			</div>
+
+<!-- ---- NOAA Bt ---- -->
+			<div class="card card-modern solarwind-modern-card">
+				<div class="solarwind-modern-header card-header card-header-modern flex-header">
+					<i class="fa-solid fa-magnet"></i><span>B<sub>t</sub></span>
+					<span class="info-tooltip" data-tooltip="
+						<b>B<sub>t</sub> is the total strength of the interplanetary magnetic field (IMF) near Earth, measured in nanotesla (nT).</b>
+
+						<b>< 5 nT: Very weak IMF.</b> Little or no effect on Earth’s magnetic field.
+
+						<b>5–10 nT: Normal background.</b> May support minor activity if B<sub>z</sub> turns southward.
+
+						<b>10–15 nT: Moderate.</b> Enhanced potential for energy transfer to Earth’s field.
+
+						<b>15–25 nT: Strong.</b> Good chance for geomagnetic disturbances, especially with southward B<sub>z</sub>.
+
+						<b>25–35 nT: Very strong.</b> Major geomagnetic storms are likely if B<sub>z</sub> is southward.
+
+						<b>> 35 nT: Extreme.</b> Intense coupling; severe storms, ground currents, and spectacular aurora possible even at lower latitudes.
+
+						<b>Key point:</b> High B<sub>t</sub> amplifies whatever effect B<sub>z</sub> has—if B<sub>z</sub> is negative and B<sub>t</sub> is high, watch out!
+						">
+						<i class="fa fa-circle-info"></i>
+					</span>
+					<span id="sw-bt-current" class="current-value"></span>
+					<span class="header-spacer"></span>
+						<select id="sw-bt-range">
+							<option value="1">1h</option>
+							<option value="3" selected>3h</option>
+							<option value="6">6h</option>
+							<option value="12">12h</option>
+							<option value="24">24h</option>
+						</select>
+				</div>
+				<div id="sw-bt-chart" class="sw-canvas"></div>
+			</div>
+
+<!-- ---- NOAA Bz ---- -->
+			<div class="card card-modern solarwind-modern-card">
+				<div class="solarwind-modern-header card-header card-header-modern flex-header">
+					<i class="fa-solid fa-magnet"></i><span>B<sub>z</sub></span>
+					<span class="info-tooltip" data-tooltip="
+						<b>B<sub>z</sub> is the north-south component of the IMF. It’s the *most critical* parameter for aurora.</b>
+
+						<b>> +5 nT: Strongly northward.</b> Geomagnetic field is shielded; aurora chances are low.
+
+						<b>0 to +5 nT: Slightly northward.</b> Usually quiet or minor activity only.
+
+						<b>0 to -5 nT: Slightly southward.</b> Energy can begin to couple to Earth; minor aurora may occur if sustained.
+
+						<b>-5 to -10 nT: Moderately southward.</b> Good chance for aurora, especially at high latitudes.
+
+						<b>-10 to -20 nT: Strongly southward.</b> Major geomagnetic storms likely, with aurora visible further south.
+
+						<b>< -20 nT: Extreme.</b> Severe geomagnetic storms; widespread, intense aurora. Possible effects on power and communications.
+
+						<b>Remember:</b> The longer B<sub>z</sub> stays negative, the higher the aurora chance—especially combined with high speed, density, and B<sub>t</sub>.
+						">
+						<i class="fa fa-circle-info"></i>
+					</span>
+					<span id="sw-bz-current" class="current-value"></span>
+					<span class="header-spacer"></span>
+						<select id="sw-bz-range">
+							<option value="1">1h</option>
+							<option value="3" selected>3h</option>
+							<option value="6">6h</option>
+							<option value="12">12h</option>
+							<option value="24">24h</option>
+						</select>
+				</div>
+				<div id="sw-bz-chart" class="sw-canvas"></div>
+			</div>
+
+<!-- ---- NOAA By ---- -->
+			<div class="card card-modern solarwind-modern-card">
+				<div class="solarwind-modern-header card-header card-header-modern flex-header">
+					<i class="fa-solid fa-magnet"></i><span>B<sub>y</sub></span>
+					<span class="info-tooltip" data-tooltip="
+						<b>B<sub>y</sub> is the east-west component of the IMF. It influences *where* and *how* aurora appears, but doesn’t usually trigger storms alone.</b>
+
+						<b>-5 to +5 nT: Neutral or weak B<sub>y</sub>.</b> Minor effect on aurora shape and location.
+
+						<b>+5 to +15 nT: Moderate positive B<sub>y</sub>.</b> Can enhance aurora on one side of the auroral oval (Scandinavia/Europe side). May increase B<sub>y</sub>-aurora events.
+
+						<b>-5 to -15 nT: Moderate negative B<sub>y</sub>.</b> Similar effect, but may enhance aurora on the other side (Alaska/Canada side).
+
+						<b>> +15 nT / < -15 nT: Strong B<sub>y</sub>.</b> Can significantly “tilt” the auroral oval. Enhances local aurora, and may allow aurora at unusual longitudes or in atypical locations.
+
+						<b>Note:</b> Strong B<sub>y</sub> with negative B<sub>z</sub> and high solar wind speed = increased aurora chance, especially in northern Europe.
+						">
+						<i class="fa fa-circle-info"></i>
+					</span>
+					<span id="sw-by-current" class="current-value"></span>
+					<span class="header-spacer"></span>
+						<select id="sw-by-range">
+							<option value="1">1h</option>
+							<option value="3" selected>3h</option>
+							<option value="6">6h</option>
+							<option value="12">12h</option>
+							<option value="24">24h</option>
+						</select>
+				</div>
+				<div id="sw-by-chart" class="sw-canvas"></div>
+			</div>
+
+  </section>
+<section class="tab-panel" data-section="solar">
+<div class="card card-modern" id="solar-image-card">
+  <div class="solar-modern-header card-header card-header-modern">
+    <i class="fa-solid fa-sun"></i>Solar & Corona-images
+  </div>
+  <div class="solar-timelapse-select-row">
+    <select id="timelapse-type" class="solar-timelapse-select">
+				<option value="SDO_193_">SDO/AIA 193</option>
+				<option value="SDO_211_">SDO/AIA 211</option>
+				<option value="SDO_171_">SDO/AIA 171</option>
+				<option value="SDO_304_">SDO/AIA 304</option>
+				<option value="SDO_131_">SDO/AIA 131</option>
+				<option value="SDO_HMIIF_">SDO/AIA HMIIF</option>
+    </select>
+    <input type="date" id="timelapse-date" class="solar-timelapse-date" />
+    <button id="timelapse-show-btn" class="solar-timelapse-show">
+      <i class="fa-solid fa-play"></i>
+    </button>
+  </div>
+  <div class="solar-image-list" id="solar-image-list"></div>
+</div>
+
+</section>
+  <section class="tab-panel" data-section="magnetometer">
+<!-- ---- Magnetometer Kiruna ---- -->
+			<div class="card card-modern magneto-modern-card">
+				<div class="magneto-modern-header card-header card-header-modern flex-header">
+					<i class="fa-solid fa-magnet"></i>Magnetometer (IRF)
+					<span class="info-tooltip" data-tooltip="
+						<b>Magnetometers measure variations in Earth's magnetic field in real time.
+						Sharp changes (positive or negative 'spikes') indicate geomagnetic disturbances, most often caused by solar wind streams, CMEs (coronal mass ejections), or other solar activity.</b>
+
+						<b>Quiet field:</b> Small, steady lines mean little or no geomagnetic activity (no aurora).
+
+						<b>Moderate disturbance:</b> Noticeable swings, typically ±50 to ±200 nT (nanoTesla), often indicate substorms and localized aurora, especially in northern regions.
+
+						<b>Strong disturbance:</b> Large, rapid swings (|ΔX| > 300 nT) mean geomagnetic storms are underway. High chance of visible aurora, even at lower latitudes.
+
+						Sudden changes often coincide with southward IMF B<sub>z</sub>, high solar wind speed/density, or arrival of solar storms.
+						Magnetometers across Scandinavia and the Arctic help track where and when aurora is most likely.
+
+						<b>Tip:</b> If multiple stations show large, simultaneous changes, aurora is likely visible right now.
+						">
+						<i class="fa fa-circle-info"></i>
+					</span>
+					<span id="mag-kiruna-current" class="current-value"></span>
+					<span id="mag-kiruna-kindex" class="k-index-value">KI</span>
+					<div class="magneto-selects">
+							<select id="mag-kiruna-range">
+								<option value="1">1h</option>
+								<option value="3" selected>3h</option>
+								<option value="6">6h</option>
+								<option value="12">12h</option>
+								<option value="24">24h</option>
+							</select>
+							<select id="mag-kiruna-component">
+								<option value="x" selected>X (nT)</option>
+								<option value="y">Y (nT)</option>
+								<option value="z">Z (nT)</option>
+							</select>
+					</div>
+				</div>
+				<div id="magneto-chart" class="mag-canvas"></div>
+			</div>
+
+<!-- ---- Magnetometer ---- FMI -->
+			<div class="card card-modern magneto-modern-card">
+				<div class="magneto-modern-header card-header card-header-modern flex-header">
+					<i class="fa-solid fa-magnet"></i>Magnetometer (FMI)
+					<span class="info-tooltip" data-tooltip="
+						<b>Magnetometers measure variations in Earth's magnetic field in real time.
+						Sharp changes (positive or negative 'spikes') indicate geomagnetic disturbances, most often caused by solar wind streams, CMEs (coronal mass ejections), or other solar activity.</b>
+
+						<b>Quiet field:</b> Small, steady lines mean little or no geomagnetic activity (no aurora).
+
+						<b>Moderate disturbance:</b> Noticeable swings, typically ±50 to ±200 nT (nanoTesla), often indicate substorms and localized aurora, especially in northern regions.
+
+						<b>Strong disturbance:</b> Large, rapid swings (|ΔX| > 300 nT) mean geomagnetic storms are underway. High chance of visible aurora, even at lower latitudes.
+
+						Sudden changes often coincide with southward IMF B<sub>z</sub>, high solar wind speed/density, or arrival of solar storms.
+						Magnetometers across Scandinavia and the Arctic help track where and when aurora is most likely.
+
+						<b>Tip:</b> If multiple stations show large, simultaneous changes, aurora is likely visible right now.
+						">
+						<i class="fa fa-circle-info"></i>
+					</span>
+					<div class="magneto-selects">
+							<select id="magneto-fmi-range">
+								<option value="1">1h</option>
+								<option value="3" selected>3h</option>
+								<option value="6">6h</option>
+								<option value="12">12h</option>
+								<option value="24">24h</option>
+							</select>
+							<select id="magneto-fmi-component">
+								<option value="x" selected>X (nT)</option>
+								<option value="y">Y (nT)</option>
+								<option value="z">Z (nT)</option>
+							</select>
+					</div>
+				</div>
+				<div id="magneto-fmi-chart" class="mag-canvas"></div>
+			</div>
+
+<!-- ---- Magnetometer ---- Global -->
+			<div class="card card-modern magneto-modern-card">
+				<div class="magneto-modern-header card-header card-header-modern flex-header">
+					<i class="fa-solid fa-magnet"></i>Magnetometer (Global)
+					<span class="info-tooltip" data-tooltip="
+						<b>Magnetometers measure variations in Earth's magnetic field in real time.
+						Sharp changes (positive or negative 'spikes') indicate geomagnetic disturbances, most often caused by solar wind streams, CMEs (coronal mass ejections), or other solar activity.</b>
+
+						<b>Quiet field:</b> Small, steady lines mean little or no geomagnetic activity (no aurora).
+
+						<b>Moderate disturbance:</b> Noticeable swings, typically ±50 to ±200 nT (nanoTesla), often indicate substorms and localized aurora, especially in northern regions.
+
+						<b>Strong disturbance:</b> Large, rapid swings (|ΔX| > 300 nT) mean geomagnetic storms are underway. High chance of visible aurora, even at lower latitudes.
+
+						Sudden changes often coincide with southward IMF B<sub>z</sub>, high solar wind speed/density, or arrival of solar storms.
+						Magnetometers across Scandinavia and the Arctic help track where and when aurora is most likely.
+
+						<b>Tip:</b> If multiple stations show large, simultaneous changes, aurora is likely visible right now.
+						">
+						<i class="fa fa-circle-info"></i>
+					</span>
+					<div class="magneto-selects">
+							<select id="magneto-global-range">
+								<option value="1">1h</option>
+								<option value="3" selected>3h</option>
+								<option value="6">6h</option>
+								<option value="12">12h</option>
+								<option value="24">24h</option>
+							</select>
+							<select id="magneto-global-component">
+								<option value="x" selected>X (nT)</option>
+								<option value="y">Y (nT)</option>
+								<option value="z">Z (nT)</option>
+							</select>
+					</div>
+				</div>
+				<div id="magneto-global-chart" class="mag-canvas"></div>
+			</div>
+  </section>
+  <section class="tab-panel" data-section="noaa">
+			<div class="card card-modern" id="topbar-links">
+				<div class="nooaforecasts-moder-header card-header card-header-modern flex-header">
+					<i class="fa-solid fa-satellite"></i>
+					<span>NOAA SWPC Forecasts</span>
+				</div>
+				<div class="topbar-links-content">
+					<a href="#" class="topbar-link" data-url="https://services.swpc.noaa.gov/text/weekly.txt">Weekly Highlights and Forecasts</a>
+					<a href="#" class="topbar-link" data-url="https://services.swpc.noaa.gov/text/3-day-forecast.txt">3-Day Forecast</a>
+					<a href="#" class="topbar-link" data-url="https://services.swpc.noaa.gov/text/3-day-geomag-forecast.txt">3-Day Geomagnetic Forecast</a>
+					<a href="#" class="topbar-link" data-url="https://services.swpc.noaa.gov/text/3-day-solar-geomag-predictions.txt">3-day Space Weather Predictions</a>
+					<a href="#" class="topbar-link" id="noaa-forecast-discussion-link">Forecast Discussion</a>
+					<a href="#" class="topbar-link" data-images="geospace">Geospace & GloTEC Images</a>
+					<button class="astro-btn" id="btn-solarcycle-ssn">
+						<i class="fa-solid fa-sun"></i>Solar Cycle Graph
+					</button>
+				<div>
+			</div>
+  </section>
+</div>
+
+<!-- ---- SUVI Overlay ---- -->
+<div id="img-overlay" class="img-overlay">
+	<div class="overlay-nav">
+		<button id="img-overlay-prev"><i class="fa fa-chevron-left"></i></button>
+		<button id="img-overlay-close" aria-label="Close"><i class="fa fa-xmark"></i></button>
+		<button id="img-overlay-next"><i class="fa fa-chevron-right"></i></button>
+	</div>
+	<img id="img-overlay-img" src="" alt="">
+</div>
+<!-- ---- SUVI Timelapse Overlay ---- -->
+<div id="timelapse-overlay" class="img-overlay">
+	<div class="timelapse-toolbar">
+		<input id="timelapse-date" type="date" style="width:130px;">
+		<select id="timelapse-type">
+			<option value="SDO_193_">SDO/AIA 193</option>
+			<option value="SDO_211_">SDO/AIA 211</option>
+			<option value="SDO_171_">SDO/AIA 171</option>
+			<option value="SDO_304_">SDO/AIA 304</option>
+			<option value="SDO_131_">SDO/AIA 131</option>
+			<option value="SDO_HMIIF_">SDO/AIA HMIIF</option>
+		</select>
+		<button id="timelapse-show">Show</button>
+		<button id="timelapse-play-continuous"><i class="fa fa-forward"></i> Play from this date</button>
+		<button id="timelapse-close" title="Close"><i class="fa fa-xmark"></i></button>
+	</div>
+	<div id="timelapse-video-container">
+	<!-- Input from js here -->
+	</div>
+</div>
+<!-- ---- Synoptic Overlay ---- -->
+<div id="synoptic-overlay" class="img-overlay">
+	<div class="timelapse-toolbar">
+		<input id="synoptic-date" type="date" style="width:130px;">
+		<button id="synoptic-play" title="Play/Pause"><i class="fa fa-play"></i></button>
+		<input id="synoptic-slider" type="range" min="0" max="1" step="1" value="0" style="width:220px;">
+		<button id="synoptic-close" title="Close"><i class="fa fa-xmark"></i></button>
+	</div>
+	<div id="synoptic-image-container">
+		<img id="synoptic-image" src="" alt="Synoptic" style="background:#222; border-radius:8px; max-width:96vw; max-height:75vh;">
+	</div>
+</div>
+<!-- ---- HUXt Overlay ---- -->
+<div id="huxt-overlay" class="img-overlay">
+	<div class="overlay-nav">
+		<button id="huxt-overlay-close" aria-label="Close"><i class="fa fa-xmark"></i></button>
+	</div>
+	<div id="huxt-video-container"></div>
+</div>
+<!-- ---- Topbar Overlay ---- -->
+<div id="topbar-overlay" class="topbar-overlay">
+	<div class="topbar-overlay-content">
+		<button id="topbar-overlay-close" title="Close"><i class="fa fa-xmark"></i></button>
+		<pre id="topbar-overlay-pre"></pre>
+	</div>
+</div>
+<!-- ---- iframe overlay ---- -->
+<div id="map-overlay" class="img-overlay" style="display:none;">
+	<div class="overlay-nav">
+		<button id="map-overlay-close" aria-label="Close"><i class="fa fa-xmark"></i></button>
+	</div>
+	<iframe id="map-overlay-iframe" src="" allowfullscreen loading="lazy" style="border:1px solid #000;width:92vw;height:92vh;background:#111;border-radius:8px;box-shadow:0 2px 18px #111;"></iframe>
+</div>
+<!-- ---- Solar & Corona overlay ---- -->
+<div id="solar-overlay-modal" class="solar-overlay-modal">
+	<div class="solar-overlay-content">
+		<button id="solar-overlay-close" title="Close"><i class="fa fa-xmark"></i></button>
+		<div class="timelapse-toolbar">
+			<input id="timelapse-date" type="date" style="width:130px;">
+			<select id="timelapse-type">
+				<option value="SDO_193_">SDO/AIA 193</option>
+				<option value="SDO_211_">SDO/AIA 211</option>
+				<option value="SDO_171_">SDO/AIA 171</option>
+				<option value="SDO_304_">SDO/AIA 304</option>
+				<option value="SDO_131_">SDO/AIA 131</option>
+				<option value="SDO_HMIIF_">SDO/AIA HMIIF</option>
+			</select>
+			<button id="timelapse-show">Show</button>
+			<button id="timelapse-close" title="Close"><i class="fa fa-xmark"></i></button>
+		</div>
+		<div id="timelapse-video-container">
+		<!-- Input from js here -->
+		</div>
+		<div id="solar-image-grid" class="solar-image-grid"></div>
+	</div>
+</div>
+<!-- ---- Astro map / graph overlay ---- -->
+<div id="astro-skyfield-modal" class="astro-overlay-modal">
+	<div class="astro-overlay-content">
+		<button class="astro-overlay-close" data-modal="astro-skyfield-modal"><i class="fa fa-xmark"></i></button>
+		<div id="astro-master-graph" style="min-height:100%;width:100%;"></div>
+	</div>
+</div>
+<div id="astro-azimuth-modal" class="astro-overlay-modal">
+	<div class="astro-overlay-content">
+		<button class="astro-overlay-close" data-modal="astro-azimuth-modal"><i class="fa fa-xmark"></i></button>
+		<div class="azimuth-map-container">
+			<div class="astro-azimuth-controls"></div>
+			<div id="astro-azimuth-map" style="height:100%;width:100%;border-radius:6px;overflow:hidden;"></div>
+			<div class="astro-azimuth-times"></div>
+		</div>
+	</div>
+</div>
+<!-- ---- Solar Cycle overlay ---- -->
+<div id="astro-solarcycle-ssn-modal" class="astro-overlay-modal">
+	<div class="astro-overlay-content">
+		<button class="astro-overlay-close" data-modal="astro-solarcycle-ssn-modal"><i class="fa fa-xmark"></i></button>
+		<div id="solarcycle-ssn-chart" style="width:100%;min-height:310px;"></div>
+		<div id="solarcycle-f107-chart" style="width:100%;min-height:310px;"></div>
+	</div>
+</div>
+
+<div id="replay-overlay" class="img-overlay">
+  <div class="timelapse-toolbar">
+    <input id="replay-date" type="date" style="width:130px;">
+    <select id="replay-station">
+	      <option value="ALL">ALL</option>
+	      <option value="KIR">KIR</option>
+	      <option value="TOP">TOP</option>
+	      <option value="KEV">KEV</option>
+	      <option value="MAS">MAS</option>
+	      <option value="KIL">KIL</option>
+	      <option value="IVA">IVA</option>
+	      <option value="MUO">MUO</option>
+	      <option value="SOD">SOD</option>
+	      <option value="PEL">PEL</option>
+	      <option value="RAN">RAN</option>
+	      <option value="OUJ">OUJ</option>
+	      <option value="MEK">MEK</option>
+	      <option value="HAN">HAN</option>
+	      <option value="NUR">NUR</option>
+	      <option value="TAR">TAR</option>
+	      <option value="BOU">BOU</option>
+	      <option value="FRD">FRD</option>
+	      <option value="BRW">BRW</option>
+	      <option value="CMO">CMO</option>
+	      <option value="TRO">TRO</option>
+	      <option value="NOR">NOR</option>
+	      <option value="HOP">HOP</option>
+    </select>
+    <select id="replay-speed">
+      <option value="60">1 min/step</option>
+      <option value="30">30s/step</option>
+      <option value="10">10s/step</option>
+    </select>
+
+    <button id="replay-load">Load</button>
+    <button id="replay-play"><i class="fa fa-play"></i> Play</button>
+    <button id="replay-pause"><i class="fa fa-pause"></i> Pause</button>
+
+    <button id="replay-close" title="Close"><i class="fa fa-xmark"></i></button>
+  </div>
+
+	  <!-- Slider row directly under controls -->
+	  <div class="replay-slider-row">
+	    <div id="replay-status" class="replay-status"></div>
+	    <input id="replay-slider" type="range" min="0" max="1440" value="0">
+	    <div id="replay-time-label" class="replay-time-label">–</div>
+	  </div>
+
+	  <div class="replay-wrap">
+	    <div class="replay-body">
+	      <!-- LEFT: images stacked -->
+	      <div class="replay-left">
+	        <div class="replay-panel">
+	          <div class="replay-title">AllSky</div>
+	          <img id="replay-allsky-img" loading="lazy" alt="AllSky replay">
+	        </div>
+	        <div class="replay-panel">
+	          <div class="replay-title">SDO 193</div>
+	          <img id="replay-sdo-img" loading="lazy" alt="SDO 193 replay">
+	        </div>
+	      </div>
+
+	      <!-- RIGHT: graphs -->
+	      <div class="replay-right">
+	        <div class="replay-graph-grid">
+	          <div class="card card-modern solarwind-modern-card">
+	            <div class="solarwind-modern-header card-header card-header-modern flex-header">
+	              <i class="fa-solid fa-wind"></i><span>Speed</span>
+	              <span id="replay-sw-speed-current" class="current-value"></span>
+	            </div>
+	            <div class="sw-canvas"><canvas id="replay-sw-speed-canvas" height="160"></canvas></div>
+	          </div>
+	          <div class="card card-modern solarwind-modern-card">
+	            <div class="solarwind-modern-header card-header card-header-modern flex-header">
+	              <i class="fa-solid fa-droplet"></i><span>Density</span>
+	              <span id="replay-sw-density-current" class="current-value"></span>
+	            </div>
+	            <div class="sw-canvas"><canvas id="replay-sw-density-canvas" height="160"></canvas></div>
+	          </div>
+	          <div class="card card-modern solarwind-modern-card">
+	            <div class="solarwind-modern-header card-header card-header-modern flex-header">
+	              <i class="fa-solid fa-magnet"></i><span>B<sub>t</sub></span>
+	              <span id="replay-sw-bt-current" class="current-value"></span>
+	            </div>
+	            <div class="sw-canvas"><canvas id="replay-sw-bt-canvas" height="160"></canvas></div>
+	          </div>
+	          <div class="card card-modern solarwind-modern-card">
+	            <div class="solarwind-modern-header card-header card-header-modern flex-header">
+	              <i class="fa-solid fa-magnet"></i><span>B<sub>z</sub></span>
+	              <span id="replay-sw-bz-current" class="current-value"></span>
+	            </div>
+	            <div class="sw-canvas"><canvas id="replay-sw-bz-canvas" height="160"></canvas></div>
+	          </div>
+	          <div class="card card-modern solarwind-modern-card">
+	            <div class="solarwind-modern-header card-header card-header-modern flex-header">
+	              <i class="fa-solid fa-magnet"></i><span>B<sub>y</sub></span>
+	              <span id="replay-sw-by-current" class="current-value"></span>
+	            </div>
+	            <div class="sw-canvas"><canvas id="replay-sw-by-canvas" height="160"></canvas></div>
+	          </div>
+	          <div class="card card-modern solarwind-modern-card">
+	            <div class="solarwind-modern-header card-header card-header-modern flex-header">
+	              <i class="fa-solid fa-chart-simple"></i><span>Kp</span>
+	              <span id="replay-kp-current" class="current-value"></span>
+	            </div>
+	            <div class="sw-canvas"><canvas id="replay-kp-canvas" height="160"></canvas></div>
+	          </div>
+	          <div class="card card-modern solarwind-modern-card">
+	            <div class="solarwind-modern-header card-header card-header-modern flex-header">
+	              <i class="fa-solid fa-chart-line"></i><span>HP30</span>
+	              <span id="replay-hp30-current" class="current-value"></span>
+	            </div>
+	            <div class="sw-canvas"><canvas id="replay-hp30-canvas" height="160"></canvas></div>
+	          </div>
+						<div class="card card-modern solarwind-modern-card replay-mag-card">
+							<div class="solarwind-modern-header card-header card-header-modern flex-header">
+								<i class="fa-solid fa-wave-square"></i><span>Magnetometer (IRF)</span>
+								<span id="replay-mag-irf-current" class="current-value"></span>
+							</div>
+							<div class="sw-canvas"><canvas id="replay-mag-irf-canvas" height="160"></canvas></div>
+						</div>
+						<div class="card card-modern solarwind-modern-card replay-mag-card">
+							<div class="solarwind-modern-header card-header card-header-modern flex-header">
+								<i class="fa-solid fa-wave-square"></i><span>Magnetometer (FMI)</span>
+								<span id="replay-mag-fmi-current" class="current-value"></span>
+							</div>
+							<div class="sw-canvas"><canvas id="replay-mag-fmi-canvas" height="160"></canvas></div>
+						</div>
+						<div class="card card-modern solarwind-modern-card replay-mag-card">
+							<div class="solarwind-modern-header card-header card-header-modern flex-header">
+								<i class="fa-solid fa-wave-square"></i><span>Magnetometer (Global)</span>
+								<span id="replay-mag-global-current" class="current-value"></span>
+							</div>
+							<div class="sw-canvas"><canvas id="replay-mag-global-canvas" height="160"></canvas></div>
+						</div>
+	        </div>
+	      </div>
+	    </div>
+	  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,65 @@
+# Python and build output
+__pycache__/
+*.py[cod]
+*.log
+env/
+venv/
+.venv/
+node_modules/
+dist/
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+._*
+*.recycle/
+.Trash-*/
+
+# Generated scientific and camera data
+app/data/images/
+app/data/moon/
+app/data/noaa_anim/
+app/data/suvi-timelapse/
+app/data/tmp/
+app/data/huxt/
+app/data/exports/
+app/data/phosphor-icons/
+app/static/aurora_oval_history/
+mariadb_data/
+fullblown/
+parkering/
+*.sqlite
+*.db
+
+# Private configuration and credentials
+.env
+.env.*
+!.env.example
+docker-compose.override.yml
+*.pid
+*.sock
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets*.json
+
+# Backups and local history
+*.bak
+*.bak[0-9]*
+*.backup
+*inCaseOfCorruption*
+**/backup/
+**/backups/
+**/_backup/
+app/static/2025-06-10-17-00/
+app/static/js/old/
+
+# Local-only project memory
+/AGENTS.md
+/AI_CONTEXT.md
+/docs/project-memory/
