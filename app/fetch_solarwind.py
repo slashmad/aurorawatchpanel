@@ -1,6 +1,7 @@
 # ---- app/fetch_solarwind.py ----
 
 from datetime import datetime, timezone
+import math
 import time
 
 from utils import (
@@ -129,9 +130,15 @@ def to_float(row, field):
         return None
 
     try:
-        return float(value)
+        value = float(value)
     except (TypeError, ValueError):
         return None
+
+    # NOAA occasionally reports NaN/Infinity; MariaDB FLOAT columns reject them.
+    if not math.isfinite(value):
+        return None
+
+    return value
 
 
 def fetch_and_store():
