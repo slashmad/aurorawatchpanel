@@ -1,4 +1,5 @@
 // app/static/js/magnetometer.js
+import { isCardActive } from './card_layout.js';
 
 import { getLocation } from './state.js';
 
@@ -168,8 +169,11 @@ export function setupMagnetometer() {
   bindMagnetometerControl(periodSelect);
   bindMagnetometerControl(compSelect);
 
-  updateMagnetometerChart();
+  const initial = updateMagnetometerChart();
   if (magnetometerRefreshTimer === null) {
-    magnetometerRefreshTimer = setInterval(updateMagnetometerChart, 60000);
+    magnetometerRefreshTimer = setInterval(() => {
+      if (isCardActive('mag-irf')) updateMagnetometerChart();
+    }, 60000);
   }
+  return initial;
 }

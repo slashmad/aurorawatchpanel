@@ -355,7 +355,8 @@ test('a missing chart library shows error codes in chart sections and the rest s
     await expect(page.locator(`.section-error[data-code="${code}"]`)).toHaveCount(1);
     await expect(page.locator(`.section-error[data-code="${code}"]`)).toContainText('Highcharts');
   }
-  await expect(page.locator('#dashboard-solarwind > .section-error')).toHaveCount(1);
+  await expect(page.locator('[data-card="sw-speed"] > .section-error')).toHaveCount(1);
+  await expect(page.locator('[data-card="mag-irf"] > .section-error')).toHaveCount(1);
   await expect(page.locator('#double-gauge-card > .section-error')).toHaveCount(1);
   // Sections that do not need charts started normally.
   await expect.poll(() => requests.filter(p => p === '/images/list').length).toBe(7);

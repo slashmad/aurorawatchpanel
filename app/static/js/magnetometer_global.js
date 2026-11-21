@@ -1,4 +1,5 @@
 // static/js/magnetometer_global.js
+import { isCardActive } from './card_layout.js';
 
 import { getLocation } from './state.js';
 
@@ -21,7 +22,9 @@ function configureHighchartsTimezone() {
 
 export async function setupMagnetometerGlobal() {
   if (globalRefreshTimer === null) {
-    globalRefreshTimer = setInterval(setupMagnetometerGlobal, 60000);
+    globalRefreshTimer = setInterval(() => {
+      if (isCardActive('mag-global')) setupMagnetometerGlobal();
+    }, 60000);
   }
 
   configureHighchartsTimezone();

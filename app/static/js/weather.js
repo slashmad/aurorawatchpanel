@@ -279,11 +279,13 @@ export async function showWeather(containerId = 'weather-card-scroll') {
   // Uppdatera headern med källa
   const header = document.querySelector('.weather-modern-header');
   if (header && weather && weather.source) {
+    const cardControls = header.querySelector('.card-controls'); // keep collapse/move controls
     header.innerHTML = `
       <i class="fa-solid fa-cloud-sun"></i>
       <span>Weather</span>
       <span class="weather-source-header"><i class="fa fa-database"></i> ${weather.source}</span>
     `;
+    if (cardControls) header.appendChild(cardControls);
   }
 }
 

@@ -1,4 +1,5 @@
 // app/static/js/solarwind.js
+import { isCardActive } from './card_layout.js';
 import { settleAll } from './section_errors.js';
 
 import { getLocation } from './state.js';
@@ -368,8 +369,15 @@ export async function fetchAndRenderSW(param, unit) {
 
 // Refreshes all five charts independently; rejects with the combined errors so
 // callers (section_errors.runSection) can show them.
+// Collapsed cards (card_layout) are skipped and refreshed when expanded.
 function refreshAllSolarwindCharts() {
-  return settleAll(swParams.map(({ key }) => [key, () => solarwindRefreshCallbacks.get(key)()]));
+  return settleAll(swParams
+    .filter(({ key }) => isCardActive(`sw-${key}`))
+    .map(({ key }) => [key, () => solarwindRefreshCallbacks.get(key)()]));
+}
+
+export function refreshSolarwindChart(key) {
+  return solarwindRefreshCallbacks.get(key)?.();
 }
 
 export function setupSolarwind() {

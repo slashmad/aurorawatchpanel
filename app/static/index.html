@@ -57,6 +57,9 @@
     <button class="leftbar-btn" data-section="noaa" title="NOAA">
       <img src="/svg/noaa_logo.svg" class="glow-icon" alt="NOAA" class="icon">
     </button>
+    <button type="button" class="leftbar-util-btn" id="reset-layout-btn" title="Reset card layout (order and collapsed cards)" aria-label="Reset card layout">
+      <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
+    </button>
   </nav>
 
 <div id="dashboard-multipanel" class="dashboard-multipanel">
@@ -68,7 +71,7 @@
 
 <div class="tab-panels-wrapper">
   <section class="tab-panel active" data-section="location">
-	<div class="card card-modern location-astro-combined">
+	<div class="card card-modern location-astro-combined" data-card="sunmoon">
 	  <div class="location-astro-flex">
 		<!-- Location till vänster -->
 		<div class="location-astro-location">
@@ -109,7 +112,7 @@
 	  </div>
 	</div>
 
-	<div class="card card-modern weather-modern-combined" id="weather-card-container">
+	<div class="card card-modern weather-modern-combined" id="weather-card-container" data-card="weather">
 	  <div class="weather-modern-header card-header card-header-modern">
 		<i class="fa-solid fa-cloud-sun"></i>
 		<span>Weather</span>
@@ -117,7 +120,7 @@
 	  <div class="weather-modern-content" id="weather-card-scroll"></div>
 	</div>
 
-	<div class="card card-modern gauge-modern-combined" id="double-gauge-card">
+	<div class="card card-modern gauge-modern-combined" id="double-gauge-card" data-card="kp-gauges">
 	  <div class="gauge-modern-flex">
 		<div class="gauge-modern-header card-header card-header-modern">
 		  <i class="fa-solid fa-bolt"></i>
@@ -129,7 +132,7 @@
 	  </div>
 	</div>
 
-	<div class="card card-modern oval-modern-combined" id="aurora-oval-card">
+	<div class="card card-modern oval-modern-combined" id="aurora-oval-card" data-card="aurora-oval">
 	  <div class="oval-modern-flex">
 		<div class="oval-modern-header card-header card-header-modern aurora-dropdown-toggle" style="cursor:pointer;">
 		  <i class="fa-solid fa-globe"></i>
@@ -148,7 +151,7 @@
 	  </div>
 	</div>
 
-	<div class="card card-modern conditions-modern-combined" id="aurora-conditions">
+	<div class="card card-modern conditions-modern-combined" id="aurora-conditions" data-card="forecast">
 	  <div class="conditions-modern-flex">
 		<div class="conditions-modern-header card-header card-header-modern">
 		  <i class="fa-solid fa-circle-info"></i>
@@ -179,7 +182,7 @@
   </div>
 
 <!-- index.html (around line 173) -->
-<div class="card card-modern allsky-current-card" data-allsky-cam="ytterboda">
+<div class="card card-modern allsky-current-card" data-allsky-cam="ytterboda" data-card="allsky">
   <div class="conditions-modern-flex">
     <div class="conditions-modern-header card-header card-header-modern">
       <i class="fa-solid fa-camera"></i>
@@ -247,7 +250,7 @@
 </div>
 
 
-	<div class="card card-modern" id="coronal-hole-card">
+	<div class="card card-modern" id="coronal-hole-card" data-card="coronal-hole">
 	  <div class="coronal-hole-modern card-header card-header-modern">
 		<i class="fa-solid fa-circle-dot"></i>
 		<span>Current Coronal Hole</span>
@@ -257,7 +260,7 @@
 	  <div id="coronal-hole-controls"></div>
 	</div>
 
-	<div class="card card-modern" id="sunspot-card">
+	<div class="card card-modern" id="sunspot-card" data-card="sunspots">
 	  <div class="sunspots-modern card-header card-header-modern">
 		<i class="fa-solid fa-circle-dot"></i>
 		<span>Current Sunspot Regions</span>
@@ -291,7 +294,7 @@
 
   <section class="tab-panel" data-section="solarwind">
 <!-- ---- NOAA Speed ---- -->
-			<div class="card card-modern solarwind-modern-card">
+			<div class="card card-modern solarwind-modern-card" data-card="sw-speed">
 				<div class="solarwind-modern-header card-header card-header-modern flex-header">
 					<i class="fa-solid fa-wind"></i><span>Speed</span>
 					<span class="info-tooltip" data-tooltip="
@@ -327,7 +330,7 @@
 			</div>
 
 <!-- ---- NOAA Density ---- -->
-			<div class="card card-modern solarwind-modern-card">
+			<div class="card card-modern solarwind-modern-card" data-card="sw-density">
 				<div class="solarwind-modern-header card-header card-header-modern flex-header">
 					<i class="fa-solid fa-droplet"></i><span>Density</span>
 					<span class="info-tooltip" data-tooltip="
@@ -363,7 +366,7 @@
 			</div>
 
 <!-- ---- NOAA Bt ---- -->
-			<div class="card card-modern solarwind-modern-card">
+			<div class="card card-modern solarwind-modern-card" data-card="sw-bt">
 				<div class="solarwind-modern-header card-header card-header-modern flex-header">
 					<i class="fa-solid fa-magnet"></i><span>B<sub>t</sub></span>
 					<span class="info-tooltip" data-tooltip="
@@ -399,7 +402,7 @@
 			</div>
 
 <!-- ---- NOAA Bz ---- -->
-			<div class="card card-modern solarwind-modern-card">
+			<div class="card card-modern solarwind-modern-card" data-card="sw-bz">
 				<div class="solarwind-modern-header card-header card-header-modern flex-header">
 					<i class="fa-solid fa-magnet"></i><span>B<sub>z</sub></span>
 					<span class="info-tooltip" data-tooltip="
@@ -435,7 +438,7 @@
 			</div>
 
 <!-- ---- NOAA By ---- -->
-			<div class="card card-modern solarwind-modern-card">
+			<div class="card card-modern solarwind-modern-card" data-card="sw-by">
 				<div class="solarwind-modern-header card-header card-header-modern flex-header">
 					<i class="fa-solid fa-magnet"></i><span>B<sub>y</sub></span>
 					<span class="info-tooltip" data-tooltip="
@@ -468,7 +471,7 @@
 
   </section>
 <section class="tab-panel" data-section="solar">
-<div class="card card-modern" id="solar-image-card">
+<div class="card card-modern" id="solar-image-card" data-card="solar-images">
   <div class="solar-modern-header card-header card-header-modern">
     <i class="fa-solid fa-sun"></i>Solar & Corona-images
   </div>
@@ -492,7 +495,7 @@
 </section>
   <section class="tab-panel" data-section="magnetometer">
 <!-- ---- Magnetometer Kiruna ---- -->
-			<div class="card card-modern magneto-modern-card">
+			<div class="card card-modern magneto-modern-card" data-card="mag-irf">
 				<div class="magneto-modern-header card-header card-header-modern flex-header">
 					<i class="fa-solid fa-magnet"></i>Magnetometer (IRF)
 					<span class="info-tooltip" data-tooltip="
@@ -533,7 +536,7 @@
 			</div>
 
 <!-- ---- Magnetometer ---- FMI -->
-			<div class="card card-modern magneto-modern-card">
+			<div class="card card-modern magneto-modern-card" data-card="mag-fmi">
 				<div class="magneto-modern-header card-header card-header-modern flex-header">
 					<i class="fa-solid fa-magnet"></i>Magnetometer (FMI)
 					<span class="info-tooltip" data-tooltip="
@@ -572,7 +575,7 @@
 			</div>
 
 <!-- ---- Magnetometer ---- Global -->
-			<div class="card card-modern magneto-modern-card">
+			<div class="card card-modern magneto-modern-card" data-card="mag-global">
 				<div class="magneto-modern-header card-header card-header-modern flex-header">
 					<i class="fa-solid fa-magnet"></i>Magnetometer (Global)
 					<span class="info-tooltip" data-tooltip="

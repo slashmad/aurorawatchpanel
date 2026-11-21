@@ -1,4 +1,5 @@
 // static/js/location.js
+import { isCardActive } from './card_layout.js';
 
 import { getLocation, setLocation, fetchAndStoreSunMoon } from './state.js';
 import { showWeather } from './weather.js';
@@ -128,7 +129,7 @@ function updateAll(callSetAurora = true, tzOverride = null) {
     </span>`;
 
   fetchAndStoreSunMoon().then(() => {
-    runSection('E-WEATHER', '#weather-card-container', () => showWeather());
+    if (isCardActive('weather')) runSection('E-WEATHER', '#weather-card-container', () => showWeather());
     if (callSetAurora && window.setAuroraForecastLocation) {
       window.setAuroraForecastLocation(curLat, curLon);
     }
