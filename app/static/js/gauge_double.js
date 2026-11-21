@@ -1,5 +1,7 @@
 // app/static/js/gauge_double.js
 
+import { destroyChartsWithin } from './chart_lifecycle.js';
+
 export function drawDoubleGauge(
   containerId,
   kpValue, hp30Value,
@@ -51,6 +53,10 @@ function statRow(label, stats, colorFn) {
 
   const container = document.getElementById(containerId);
   if (!container) return;
+
+  // The markup below replaces the gauge elements; destroy the previous gauges
+  // first, otherwise every 5-minute redraw leaks two complete charts.
+  destroyChartsWithin(container);
 
   container.innerHTML = `
   <div style="width: 100%; display: flex; flex-direction: column; align-items: stretch; border-radius: 0.35rem;">

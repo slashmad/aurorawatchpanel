@@ -190,3 +190,28 @@ test('day-based cards refresh after local midnight only once idle', async ({ pag
   await advance(page, 1 * MIN); await tick(page);
   expect((await calls(page)).daily).toBe(1);
 });
+
+test('redrawing the Kp/HP30 gauges does not leak the previous charts', async ({ page }) => {
+  await page.goto('/static/js/state.js', { waitUntil: 'domcontentloaded' });
+  const result = await page.evaluate(async () => {
+    // Minimal Highcharts double: same-element reuse destroys, like the real library.
+    const charts = [];
+    window.Highcharts = {
+      charts,
+      chart(id) {
+        const renderTo = typeof id === 'string' ? document.getElementById(id) : id;
+        const previous = charts.findIndex(c => c && c.renderTo === renderTo);
+        if (previous >= 0) charts[previous].destroy();
+        const chart = { renderTo, destroy() { charts[charts.indexOf(this)] = undefined; } };
+        charts.push(chart);
+        return chart;
+      },
+    };
+    document.body.innerHTML = '<div id="double-gauge"></div>';
+    const { drawDoubleGauge } = await import('/static/js/gauge_double.js');
+    for (let i = 0; i < 12; i += 1) drawDoubleGauge('double-gauge', 3, 4, null, null, null, null, null, null, null, null);
+    const alive = charts.filter(Boolean);
+    return { alive: alive.length, detached: alive.filter(c => !document.contains(c.renderTo)).length };
+  });
+  expect(result).toEqual({ alive: 2, detached: 0 });
+});
