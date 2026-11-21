@@ -1,6 +1,25 @@
-# Aurora Watch Panel
+<p align="center">
+  <img src="app/static/icons/favicon-256x256.png" width="128" alt="Aurora Watch Panel icon">
+</p>
+
+<h1 align="center">Aurora Watch Panel</h1>
+
+<p align="center">
+  A self-hosted dashboard for aurora watching: space weather, solar imagery, local weather, astronomy and all-sky cameras.
+</p>
+
+<p align="center">
+  <a href="https://aurora.slashmad.com">Live site</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="https://github.com/slashmad/aurorawatchpanel/issues">Report a problem</a>
+</p>
+
+[![aurora.slashmad.com](https://img.shields.io/website?url=https%3A%2F%2Faurora.slashmad.com&style=flat-square&label=aurora.slashmad.com)](https://aurora.slashmad.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 
 Aurora Watch Panel is a self-hosted dashboard for aurora observations, space weather, solar imagery, local weather, astronomy, and all-sky cameras. It combines a FastAPI backend, a browser-based dashboard, MariaDB, NGINX, and independent collectors for external data feeds.
+
+**Live view:** see it running at [aurora.slashmad.com](https://aurora.slashmad.com).
 
 The project is created and maintained by [slashmad](https://github.com/slashmad).
 
@@ -177,6 +196,14 @@ Never commit `.env`, credentials, private keys, database contents, internal host
 ## Contributing and forks
 
 Issues, changes, and forks are welcome. Keep external-source integrations defensive: validate responses, preserve last-known-good data, and expose freshness or failure rather than silently replacing valid observations with empty state.
+
+## Support
+
+Like Aurora Watch Panel? Buy me a beer 🍺
+
+[![GitHub Sponsors](https://img.shields.io/badge/GitHub-Sponsors-EA4AAA?logo=githubsponsors&logoColor=white&style=flat-square)](https://github.com/sponsors/slashmad)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-buy%20me%20a%20beer-FF5E5B?logo=ko-fi&logoColor=white&style=flat-square)](https://ko-fi.com/slashmad)
+[![Liberapay](https://img.shields.io/badge/Liberapay-donate-F6C915?logo=liberapay&logoColor=black&style=flat-square)](https://liberapay.com/slashmad/)
 
 ## License and attribution
 

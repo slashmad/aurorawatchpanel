@@ -43,6 +43,7 @@
 <symbol id="aurora-magnetometer" viewBox="0 0 32 32"><g stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><g fill="var(--aurora-icon-accent, currentColor)" stroke="none" opacity=".13"><path d="M7 5h5v11a4 4 0 0 0 8 0V5h5v11a9 9 0 0 1-18 0Z"/></g><g fill="none" stroke="currentColor"><path d="M7 5h5v11a4 4 0 0 0 8 0V5h5v11a9 9 0 0 1-18 0Z"/></g><g fill="none" stroke="var(--aurora-icon-accent, currentColor)"><path d="M7 10h5m8 0h5"/></g><g fill="var(--aurora-icon-accent, currentColor)" stroke="none"><path d="M7 5h5v5H7Zm13 0h5v5h-5Z" opacity=".24"/></g></g></symbol>
 <symbol id="aurora-solar-images" viewBox="0 0 32 32"><g stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><g fill="var(--aurora-icon-accent, currentColor)" stroke="none" opacity=".13"><circle cx="16" cy="16" r="7"/></g><g fill="none" stroke="currentColor"><circle cx="16" cy="16" r="7"/></g><g fill="none" stroke="var(--aurora-icon-accent, currentColor)"><path d="M16 2.5v2.8m0 21.4v2.8M2.5 16h2.8m21.4 0h2.8M6.45 6.45l2 2m15.1 15.1 2 2M6.45 25.55l2-2m15.1-15.1 2-2"/></g><g fill="none" stroke="var(--aurora-icon-accent, currentColor)"><path d="M12.4 15.5a3.8 3.8 0 0 1 5.8-2.6"/></g></g></symbol>
 <symbol id="aurora-noaa-forecast" viewBox="0 0 32 32"><g stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><g fill="var(--aurora-icon-accent, currentColor)" stroke="none" opacity=".13"><path d="M19 4v7h7Z"/></g><g fill="none" stroke="currentColor"><path d="M19 4H8a2 2 0 0 0-2 2v20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V11Z"/></g><g fill="none" stroke="currentColor"><path d="M19 4v7h7M10 10h4"/></g><g fill="var(--aurora-icon-accent, currentColor)" stroke="none" opacity=".13"><path d="m10 23 4-5 4 3 4-6v9H10Z"/></g><g fill="none" stroke="var(--aurora-icon-accent, currentColor)"><path d="m10 23 4-5 4 3 4-6"/></g></g></symbol>
+<symbol id="aurora-support" viewBox="0 0 32 32"><!-- added for the support tab, same style as the set --><g stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><g fill="var(--aurora-icon-accent, currentColor)" stroke="none" opacity=".13"><path d="M16 26.5S5 19.6 5 12.3A5.8 5.8 0 0 1 16 9.6a5.8 5.8 0 0 1 11 2.7c0 7.3-11 14.2-11 14.2Z"/></g><g fill="none" stroke="currentColor"><path d="M16 26.5S5 19.6 5 12.3A5.8 5.8 0 0 1 16 9.6a5.8 5.8 0 0 1 11 2.7c0 7.3-11 14.2-11 14.2Z"/></g><g fill="none" stroke="var(--aurora-icon-accent, currentColor)"><path d="M10.5 12.2a3 3 0 0 1 3-2.4"/></g></g></symbol>
 </svg>
   <nav id="leftbar">
     <button class="leftbar-btn" data-section="location" title="Location & overview" aria-label="Location & overview">
@@ -71,6 +72,9 @@
     </button>
     <button class="leftbar-btn" data-section="noaa" title="NOAA forecasts" aria-label="NOAA forecasts">
       <svg class="aurora-nav-icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><use href="#aurora-noaa-forecast"></use></svg>
+    </button>
+    <button class="leftbar-btn" data-section="support" title="Support the project" aria-label="Support the project">
+      <svg class="aurora-nav-icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false"><use href="#aurora-support"></use></svg>
     </button>
     <button type="button" class="leftbar-util-btn" id="reset-layout-btn" title="Reset card layout (order and collapsed cards)" aria-label="Reset card layout">
       <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
@@ -646,6 +650,25 @@
 					</button>
 				<div>
 			</div>
+  </section>
+
+  <section class="tab-panel" data-section="support">
+    <div class="card card-modern support-card">
+      <div class="card-header card-header-modern support-header">
+        <i class="fa-solid fa-heart" aria-hidden="true"></i>Support Aurora Watch Panel
+      </div>
+      <div class="support-body">
+        <p>Aurora Watch Panel is free, has no ads or tracking, runs on my own server and is built in my spare time.
+          If it helps you catch the aurora, you can buy me a beer 🍺 or support it regularly.</p>
+        <div class="support-links">
+          <a class="support-link support-github" href="https://github.com/sponsors/slashmad" target="_blank" rel="noopener noreferrer">GitHub Sponsors</a>
+          <a class="support-link support-kofi" href="https://ko-fi.com/slashmad" target="_blank" rel="noopener noreferrer">Ko-fi · buy me a beer</a>
+          <a class="support-link support-liberapay" href="https://liberapay.com/slashmad/" target="_blank" rel="noopener noreferrer">Liberapay</a>
+        </div>
+        <p class="support-note">Source code, bug reports and ideas:
+          <a href="https://github.com/slashmad/aurorawatchpanel" target="_blank" rel="noopener noreferrer">github.com/slashmad/aurorawatchpanel</a></p>
+      </div>
+    </div>
   </section>
 </div>
 

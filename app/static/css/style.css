@@ -1435,7 +1435,7 @@ span:hover > .rt-tooltip {
   max-width: 480px;
 }
 
-.location-modern-header, .gauge-modern-header, .oval-modern-header, .conditions-modern-header, .solarwind-modern-header, .magneto-modern-header, .solar-modern-header, .weather-modern-header, .nooaforecasts-moder-header, .astro-mapgraph-header, .coronal-hole-modern, .sunspots-modern {
+.location-modern-header, .gauge-modern-header, .oval-modern-header, .conditions-modern-header, .solarwind-modern-header, .magneto-modern-header, .solar-modern-header, .support-header, .weather-modern-header, .nooaforecasts-moder-header, .astro-mapgraph-header, .coronal-hole-modern, .sunspots-modern {
   font-size: 0.98em;
   font-weight: 700;
   color: #62d7ff;
@@ -2511,3 +2511,22 @@ span:hover > .rt-tooltip {
 .aurora-icons-mono .aurora-nav-icon {
   --aurora-icon-accent: currentColor;
 }
+
+/* ---- Support tab ---- */
+.support-card { max-width: 480px; }
+.support-body { padding: 0.4rem 0.2rem 0.6rem; font-size: 0.85rem; line-height: 1.45; color: #c9d6e6; }
+.support-links { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.8rem 0; }
+.support-link {
+  display: inline-block;
+  padding: 0.45rem 0.8rem;
+  border-radius: 0.35rem;
+  font-weight: 700;
+  text-decoration: none;
+  color: #fff;
+}
+.support-link:hover, .support-link:focus-visible { filter: brightness(1.12); outline: 2px solid #38e1ff66; }
+.support-github { background: #ea4aaa; }
+.support-kofi { background: #ff5e5b; }
+.support-liberapay { background: #f6c915; color: #1b1b1b; }
+.support-note { font-size: 0.78rem; color: #8fa1b8; }
+.support-note a { color: #38e1ff; }

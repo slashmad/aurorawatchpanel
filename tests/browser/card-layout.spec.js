@@ -217,3 +217,21 @@ test('a collapsed forecast does not stop the sun & moon box from updating', asyn
   await expect(page.locator('#sunrise-info')).toHaveText('08:26');
   await expect(page.locator('#next-fullmoon-info')).toHaveText('2026-11-24');
 });
+
+test('the support tab shows the funding links without loading anything', async ({ page }) => {
+  const requests = await openDashboard(page);
+  requests.length = 0;
+  await page.locator('.leftbar-btn[data-section="support"]').click();
+  await expect(page.locator('.tab-panel[data-section="support"]')).toBeVisible();
+  const links = await page.locator('.support-link').evaluateAll(els => els.map(a => [a.getAttribute('href'), a.target, a.rel]));
+  expect(links).toEqual([
+    ['https://github.com/sponsors/slashmad', '_blank', 'noopener noreferrer'],
+    ['https://ko-fi.com/slashmad', '_blank', 'noopener noreferrer'],
+    ['https://liberapay.com/slashmad/', '_blank', 'noopener noreferrer'],
+  ]);
+  await page.waitForTimeout(200);
+  expect(requests).toEqual([]);
+  await expect(page.locator('#dashboard-multipanel')).toBeHidden();
+  await page.locator('.leftbar-btn[data-section="location"]').click();
+  await expect(page.locator('#dashboard-multipanel')).toBeVisible();
+});
