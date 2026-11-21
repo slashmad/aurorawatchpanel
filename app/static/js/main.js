@@ -540,7 +540,7 @@ export function updateSolarLunarBox() {
     moonPhaseLabelEl.textContent = "–";
     moonAltEl.textContent        = "–";
     nextFullMoonEl.textContent   = "–";
-    moonImg.src                  = "/data/icons/moon-full.svg";
+    moonImg.src                  = "/data/moon/moon-00.jpg";
     moonImg.alt                  = "No moon data";
     moonImg.title                = "No moon data";
   }

@@ -29,7 +29,6 @@ app/data/suvi-timelapse/
 app/data/tmp/
 app/data/huxt/
 app/data/exports/
-app/data/phosphor-icons/
 app/static/aurora_oval_history/
 mariadb_data/
 fullblown/
