@@ -456,3 +456,25 @@ test('solar images refresh quietly once stale, without the loading placeholder',
   await expect.poll(() => lists.length).toBe(7);
   expect(await page.evaluate(() => window.__placeholderSeen)).toBe(false);
 });
+
+test('stations without data in the window are named with their last report', async ({ page }) => {
+  await page.goto('/static/js/state.js', { waitUntil: 'domcontentloaded' });
+  const result = await page.evaluate(async () => {
+    document.body.innerHTML = '<div class="card"><div id="magneto-chart"></div></div>';
+    const { showMissingStations } = await import('/static/js/station_freshness.js');
+    const note = () => document.querySelector('.station-missing-note')?.textContent ?? null;
+    showMissingStations('magneto-chart', { KIR: '2026-11-21T10:04:00', TOP: null }, 3);
+    const first = note();
+    showMissingStations('magneto-chart', { KIR: '2026-11-21T10:04:00' }, 12);
+    const second = note();
+    const count = document.querySelectorAll('.station-missing-note').length;
+    showMissingStations('magneto-chart', {}, 3);
+    return { first, second, count, cleared: note() };
+  });
+  expect(result).toEqual({
+    first: 'No data in the last 3 h: KIR (last 2026-11-21 10:04 UTC), TOP (no data yet)',
+    second: 'No data in the last 12 h: KIR (last 2026-11-21 10:04 UTC)',
+    count: 1,
+    cleared: null,
+  });
+});

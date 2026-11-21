@@ -2538,3 +2538,10 @@ span:hover > .rt-tooltip {
   font-size: 0.6rem;
 }
 .leaflet-container .leaflet-control-attribution a { color: #9fc7d8; }
+
+/* Stations without data in the chart window (station_freshness.js) */
+.station-missing-note {
+  margin: 0.2rem 0.3rem 0.1rem;
+  font-size: 0.68rem;
+  color: #e0b45a;
+}

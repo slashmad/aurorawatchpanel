@@ -1,4 +1,5 @@
 // app/static/js/magnetometer_fmi.js
+import { showMissingStations } from './station_freshness.js';
 
 import { getLocation } from './state.js';
 
@@ -35,6 +36,7 @@ export async function setupMagnetometerFMI() {
     const res = await fetch(`/magneto_fmi/timeseries?stations=${stationIds}&hours=${period}&component=${component}&_=${Date.now()}`);
     const json = await res.json();
     if (!json.data) return;
+    showMissingStations('magneto-fmi-chart', json.missing, period);
 
     const series = FMI_STATIONS.map(station => ({
         name: station.name,

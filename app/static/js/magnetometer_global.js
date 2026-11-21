@@ -1,4 +1,5 @@
 // static/js/magnetometer_global.js
+import { showMissingStations } from './station_freshness.js';
 import { isCardActive } from './card_layout.js';
 
 import { getLocation } from './state.js';
@@ -38,6 +39,7 @@ export async function setupMagnetometerGlobal() {
   const res = await fetch(url);
   const json = await res.json();
   if (!json.data) return;
+  showMissingStations('magneto-global-chart', json.missing, period);
 
   const series = GLOBAL_MAG_STATIONS.map(station => ({
     name: station.name,

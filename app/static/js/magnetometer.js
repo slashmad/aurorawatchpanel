@@ -1,4 +1,5 @@
 // app/static/js/magnetometer.js
+import { showMissingStations } from './station_freshness.js';
 import { isCardActive } from './card_layout.js';
 
 import { getLocation } from './state.js';
@@ -30,6 +31,7 @@ export async function fetchAndRenderMagIRF(period = 6, component = "x") {
   const res = await fetch(`/magneto/timeseries_multi?stations=${stationIds}&hours=${period}&component=${component}&_=${Date.now()}`);
   const json = await res.json();
   if (!json.data) return;
+  showMissingStations('magneto-chart', json.missing, period);
   const kindexRes = await fetch(`/kindex/timeseries?stations=${stationIds}&hours=${period * 2}&_=${Date.now()}`);
   const kindexJson = await kindexRes.json();
 

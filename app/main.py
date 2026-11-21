@@ -1035,6 +1035,14 @@ def query_relative_series(cur, table, column, station, cutoff, max_points=MAGNET
     return [{"time": r["timestamp"], "value": round(r["v"] - base, 2)} for r in rows]
 
 
+def station_last_seen(cur, table, station):
+    """Latest stored timestamp for a station (None if it has never reported).
+    `table` must come from the endpoints' fixed allowlists."""
+    cur.execute(f"SELECT MAX(timestamp) AS last FROM {table} WHERE station = %s", (station,))
+    row = cur.fetchone()
+    return row["last"] if row else None
+
+
 @app.get("/magneto/timeseries_multi")
 def magneto_timeseries_multi(
     stations: str,
@@ -1050,15 +1058,20 @@ def magneto_timeseries_multi(
         col_map = {"x": "kirx", "y": "kiry", "z": "kirz"}
         col = col_map[component]
         data = {}
+        missing = {}
         with db.cursor() as cur:
             for st in station_list:
                 cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
                 series = query_relative_series(cur, "magnetometer", col, st, cutoff)
                 if series:
                     data[st] = series
+                else:
+                    # Stations without data in the window, with their last report,
+                    # so the chart can say why a station is missing.
+                    missing[st] = station_last_seen(cur, "magnetometer", st)
     finally:
         db.close()
-    return {"data": data}
+    return {"data": data, "missing": missing}
 
 @app.get("/magneto_uit/timeseries")
 def magneto_uit_timeseries(
@@ -1144,15 +1157,20 @@ def magneto_fmi_timeseries(
             component = "x"
         comp = component.lower()
         data = {}
+        missing = {}
         with db.cursor() as cur:
             for st in station_list:
                 cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
                 series = query_relative_series(cur, "magnetometer_fmi", comp, st, cutoff)
                 if series:
                     data[st] = series
+                else:
+                    # Stations without data in the window, with their last report,
+                    # so the chart can say why a station is missing.
+                    missing[st] = station_last_seen(cur, "magnetometer_fmi", st)
     finally:
         db.close()
-    return {"data": data}
+    return {"data": data, "missing": missing}
 
 @app.get("/magneto_global/timeseries")
 def magneto_global_timeseries(
@@ -1167,15 +1185,20 @@ def magneto_global_timeseries(
             component = "x"
         comp = component.lower()
         data = {}
+        missing = {}
         with db.cursor() as cur:
             for st in station_list:
                 cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
                 series = query_relative_series(cur, "magnetometer_global", comp, st, cutoff)
                 if series:
                     data[st] = series
+                else:
+                    # Stations without data in the window, with their last report,
+                    # so the chart can say why a station is missing.
+                    missing[st] = station_last_seen(cur, "magnetometer_global", st)
     finally:
         db.close()
-    return {"data": data}
+    return {"data": data, "missing": missing}
 
 def _insert_aurora_flag(payload):
     db = get_db()

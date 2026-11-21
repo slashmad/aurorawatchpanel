@@ -6,7 +6,10 @@ import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 IRF_STATIONS = {
-    "KIR": "https://www2.irf.se/maggraphs/rt_iaga_last_hour_secondary.txt",
+    # Today's 1-minute file (UTC day) from the secondary (backup) magnetometer.
+    # The former last-hour file lost everything older than one hour whenever
+    # IRF paused publishing; the daily file lets a resumed feed backfill.
+    "KIR": "https://www2.irf.se/maggraphs/rt_iaga_secondary.txt",
     "TOP": "https://www2.irf.se/mag/tormestorp/iaga2002/{YYYY}/{MM}/top{YYYY}{MM}{DD}qsec.sec",
 }
 
@@ -54,53 +57,70 @@ GIN_URL = (
 TOP_OVERLAP_MINUTES = 10
 TOP_DEFAULT_LOOKBACK_HOURS = 6
 
+# KIR: re-insert only the tail of the daily file (INSERT IGNORE is idempotent).
+KIR_OVERLAP_MINUTES = 10
+
+IAGA_MISSING = 88888.0  # IAGA-2002 uses 88888 (not observed) and 99999 (missing)
+
 def _get_last_timestamp(station: str):
     """Return latest timestamp for station from DB, or None."""
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("SELECT MAX(timestamp) FROM magnetometer WHERE station=%s", (station,))
+        cur.execute("SELECT MAX(timestamp) AS last FROM magnetometer WHERE station=%s", (station,))
         row = cur.fetchone()
         cur.close()
         conn.close()
-        return row[0] if row and row[0] else None
+        # The connection uses DictCursor; the former row[0] always raised and
+        # silently returned None, so every run re-read the default lookback.
+        if not row:
+            return None
+        return row["last"] if isinstance(row, dict) else row[0]
     except Exception:
         return None
 
 def _top_url_for_date(d):
     return IRF_STATIONS["TOP"].format(YYYY=d.strftime("%Y"), MM=d.strftime("%m"), DD=d.strftime("%d"))
 
-def fetch_kir():
-    """Fetch Kiruna data, which is already 1-min filtered."""
-    text = fetch_text(IRF_STATIONS["KIR"], timeout=15)
-    if not text:
-        log("[KIR] No data fetched")
-        return []
+def _iaga_value(token):
+    value = float(token)
+    return None if value >= IAGA_MISSING else value
+
+
+def parse_kir_iaga(text, since=None):
+    """Rows from a Kiruna IAGA-2002 text; skips header lines, rows without any
+    X/Y/Z value, and (when given) rows older than `since`."""
     data = []
-    for line in text.strip().splitlines():
+    for line in (text or "").strip().splitlines():
         if not line or line.startswith("#") or "|" in line:
             continue
         parts = line.split()
         if len(parts) < 7:
             continue
-        date_s, time_s = parts[0], parts[1]
         try:
-            dt = parse_datetime(f"{date_s} {time_s}", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S")
-            kirx = float(parts[3])
-            kiry = float(parts[4])
-            kirz = float(parts[5])
-            kirf = float(parts[6]) if parts[6] != "99999.00" else None
-            data.append({
-                "station": "KIR",
-                "dt": dt,
-                "kirx": kirx,
-                "kiry": kiry,
-                "kirz": kirz,
-                "kirf": kirf,
-            })
-        except Exception:
+            dt = parse_datetime(f"{parts[0]} {parts[1]}", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S")
+            kirx, kiry, kirz, kirf = (_iaga_value(t) for t in parts[3:7])
+        except (TypeError, ValueError):
             continue
+        if dt is None or (kirx is None and kiry is None and kirz is None):
+            continue
+        if since is not None and dt < since:
+            continue
+        data.append({"station": "KIR", "dt": dt, "kirx": kirx, "kiry": kiry, "kirz": kirz, "kirf": kirf})
     return data
+
+
+def fetch_kir():
+    """Fetch today's Kiruna 1-minute data, keeping only rows near or after the
+    latest stored one."""
+    text = fetch_text(IRF_STATIONS["KIR"], timeout=15)
+    if not text:
+        log("[KIR] No data fetched")
+        return []
+    last_ts = _get_last_timestamp("KIR")
+    since = last_ts - timedelta(minutes=KIR_OVERLAP_MINUTES) if last_ts else None
+    return parse_kir_iaga(text, since=since)
+
 
 def fetch_top():
     """Fetch Tormestorp data (1-second). Store max(|TOPH|) per minute with data-safe cutoff."""

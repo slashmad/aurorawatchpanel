@@ -367,10 +367,11 @@ class MagnetoTimeseriesMultiEndpointTests(unittest.TestCase):
             {"time": "2026-08-02T09:30:00", "value": -2.0},
             {"time": "2026-08-02T10:30:00", "value": 2.0},
         ]
-        self.assertEqual(result, {"data": {
+        self.assertEqual(result["data"], {
             "KIR": expected_series,
             "ABC": expected_series,
-        }})
+        })
+        self.assertEqual(result["missing"], {})
         self.assertEqual(database.close_count, 1)
         query = relative_series_query("magnetometer", "kiry")
         self.assertEqual(database.fake_cursor.executed, [
@@ -392,9 +393,10 @@ class MagnetoTimeseriesMultiEndpointTests(unittest.TestCase):
 
                 result = self.call_endpoint(database, component=component)
 
-                self.assertEqual(result, {"data": {
+                self.assertEqual(result["data"], {
                     "KIR": [{"time": "2026-08-02T10:00:00", "value": 0.0}],
-                }})
+                })
+                self.assertEqual(result["missing"], {})
                 self.assertEqual(
                     database.fake_cursor.executed[0][0],
                     relative_series_query("magnetometer", column),
@@ -406,7 +408,7 @@ class MagnetoTimeseriesMultiEndpointTests(unittest.TestCase):
 
         result = self.call_endpoint(database, stations=" , ")
 
-        self.assertEqual(result, {"data": {}})
+        self.assertEqual(result, {"data": {}, "missing": {}})
         self.assertEqual(database.fake_cursor.executed, [])
         self.assertEqual(database.close_count, 1)
 
@@ -600,11 +602,19 @@ class MagnetoFmiTimeseriesEndpointTests(unittest.TestCase):
 
         result = self.call_endpoint(database)
 
-        self.assertEqual(result, {"data": {}})
+        self.assertEqual(result, {
+            "data": {},
+            "missing": {station: None for station in self.DEFAULT_STATIONS},
+        })
         query = relative_series_query("magnetometer_fmi", "x")
+        last_seen = "SELECT MAX(timestamp) AS last FROM magnetometer_fmi WHERE station = %s"
         self.assertEqual(database.fake_cursor.executed, [
-            (query, relative_series_params(station, "2026-08-02 09:00:00"))
+            call
             for station in self.DEFAULT_STATIONS
+            for call in (
+                (query, relative_series_params(station, "2026-08-02 09:00:00")),
+                (last_seen, (station,)),
+            )
         ])
         self.assertEqual(database.close_count, 1)
 
@@ -628,10 +638,11 @@ class MagnetoFmiTimeseriesEndpointTests(unittest.TestCase):
                     {"time": "2026-08-02T09:30:00", "value": -2.0},
                     {"time": "2026-08-02T10:30:00", "value": 2.0},
                 ]
-                self.assertEqual(result, {"data": {
+                self.assertEqual(result["data"], {
                     "KEV": expected_series,
                     "MAS": expected_series,
-                }})
+                })
+                self.assertEqual(result["missing"], {})
                 query = relative_series_query("magnetometer_fmi", column)
                 self.assertEqual(database.fake_cursor.executed, [
                     (query, relative_series_params("KEV", "2026-08-02 09:00:00")),
@@ -644,7 +655,7 @@ class MagnetoFmiTimeseriesEndpointTests(unittest.TestCase):
 
         result = self.call_endpoint(database, stations=" , ")
 
-        self.assertEqual(result, {"data": {}})
+        self.assertEqual(result, {"data": {}, "missing": {}})
         self.assertEqual(database.fake_cursor.executed, [])
         self.assertEqual(database.close_count, 1)
 
@@ -677,11 +688,19 @@ class MagnetoGlobalTimeseriesEndpointTests(unittest.TestCase):
 
         result = self.call_endpoint(database)
 
-        self.assertEqual(result, {"data": {}})
+        self.assertEqual(result, {
+            "data": {},
+            "missing": {station: None for station in self.DEFAULT_STATIONS},
+        })
         query = relative_series_query("magnetometer_global", "x")
+        last_seen = "SELECT MAX(timestamp) AS last FROM magnetometer_global WHERE station = %s"
         self.assertEqual(database.fake_cursor.executed, [
-            (query, relative_series_params(station, "2026-08-02 09:00:00"))
+            call
             for station in self.DEFAULT_STATIONS
+            for call in (
+                (query, relative_series_params(station, "2026-08-02 09:00:00")),
+                (last_seen, (station,)),
+            )
         ])
         self.assertEqual(database.close_count, 1)
 
@@ -705,10 +724,11 @@ class MagnetoGlobalTimeseriesEndpointTests(unittest.TestCase):
                     {"time": "2026-08-02T09:30:00", "value": -2.0},
                     {"time": "2026-08-02T10:30:00", "value": 2.0},
                 ]
-                self.assertEqual(result, {"data": {
+                self.assertEqual(result["data"], {
                     "BOU": expected_series,
                     "FRD": expected_series,
-                }})
+                })
+                self.assertEqual(result["missing"], {})
                 query = relative_series_query("magnetometer_global", column)
                 self.assertEqual(database.fake_cursor.executed, [
                     (query, relative_series_params("BOU", "2026-08-02 09:00:00")),
@@ -721,7 +741,7 @@ class MagnetoGlobalTimeseriesEndpointTests(unittest.TestCase):
 
         result = self.call_endpoint(database, stations=" , ")
 
-        self.assertEqual(result, {"data": {}})
+        self.assertEqual(result, {"data": {}, "missing": {}})
         self.assertEqual(database.fake_cursor.executed, [])
         self.assertEqual(database.close_count, 1)
 
