@@ -1,5 +1,6 @@
 // app/static/js/aurora_forecast.js
 
+import { fetchShared } from './shared_fetch.js';
 import { getLocation, setLocation } from './state.js';
 import { showWeather, showInPlaceTime, getParsedWeatherAndSunMoon } from './weather.js';
 import { fetchAndRenderSW } from './solarwind.js';
@@ -252,17 +253,17 @@ export async function updateAuroraForecasts() {
       bzRes, byRes, densRes, speedRes, btRes,
       kirxRes, fmiRes, hpRes, kpRes, astroRes, flagsRes
     ] = await Promise.all([
-      fetch(`/solarwind/timeseries?param=bz&hours=12`),
-      fetch(`/solarwind/timeseries?param=by&hours=12`),
-      fetch(`/solarwind/timeseries?param=density&hours=12`),
-      fetch(`/solarwind/timeseries?param=speed&hours=12`),
-      fetch(`/solarwind/timeseries?param=bt&hours=12`),
-      fetch(`/magneto/timeseries_multi?stations=KIR&hours=12`),
-      fetch(`/magneto_fmi/timeseries?stations=${FMI_STATIONS.map(s => s.id).join(",")}&hours=12&component=x`),
-      fetch(`/hp30/timeseries?hours=12`),
-      fetch(`/kp/timeseries?hours=12`),
-      fetch(`/astro/skyfield-astro?lat=${lat}&lon=${lon}&tz=${encodeURIComponent(tz)}`),
-      fetch(`/aurora/flags`)
+      fetchShared(`/solarwind/timeseries?param=bz&hours=12`),
+      fetchShared(`/solarwind/timeseries?param=by&hours=12`),
+      fetchShared(`/solarwind/timeseries?param=density&hours=12`),
+      fetchShared(`/solarwind/timeseries?param=speed&hours=12`),
+      fetchShared(`/solarwind/timeseries?param=bt&hours=12`),
+      fetchShared(`/magneto/timeseries_multi?stations=KIR&hours=12`),
+      fetchShared(`/magneto_fmi/timeseries?stations=${FMI_STATIONS.map(s => s.id).join(",")}&hours=12&component=x`),
+      fetchShared(`/hp30/timeseries?hours=12`),
+      fetchShared(`/kp/timeseries?hours=12`),
+      fetchShared(`/astro/skyfield-astro?lat=${lat}&lon=${lon}&tz=${encodeURIComponent(tz)}`),
+      fetchShared(`/aurora/flags`)
     ]);
 
     // Parse all data

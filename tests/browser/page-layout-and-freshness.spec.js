@@ -215,3 +215,48 @@ test('redrawing the Kp/HP30 gauges does not leak the previous charts', async ({ 
   });
   expect(result).toEqual({ alive: 2, detached: 0 });
 });
+
+test('shared fetch coalesces identical requests and isolates callers', async ({ page }) => {
+  await page.goto('/static/js/state.js', { waitUntil: 'domcontentloaded' });
+  const result = await page.evaluate(async () => {
+    const calls = [];
+    let fail = false;
+    window.fetch = async url => {
+      calls.push(url);
+      if (fail) return new Response('not json', { status: 500 });
+      return new Response(JSON.stringify({ data: [{ v: 1 }] }), { status: 200 });
+    };
+    const { fetchShared } = await import('/static/js/shared_fetch.js');
+    const realNow = Date.now;
+    let t = realNow();
+    Date.now = () => t;
+
+    const [a, b] = await Promise.all([
+      fetchShared('/kp/timeseries?hours=12&_=1'),
+      fetchShared('/kp/timeseries?_=2&hours=12'),
+    ]);
+    const ja = await a.json();
+    const jb = await b.json();
+    ja.data[0].v = 99;
+    const isolated = jb.data[0].v === 1;
+    const afterBurst = calls.length;
+
+    await fetchShared('/kp/timeseries?hours=3');
+    const differentQuery = calls.length;
+
+    t += 25_000;
+    await fetchShared('/kp/timeseries?hours=12');
+    const afterExpiry = calls.length;
+
+    fail = true;
+    let firstError = null;
+    try { await (await fetchShared('/aurora/flags')).json(); } catch (err) { firstError = err.name; }
+    fail = false;
+    const retried = await (await fetchShared('/aurora/flags')).json();
+    Date.now = realNow;
+    return { afterBurst, isolated, differentQuery, afterExpiry, firstError, retriedOk: retried.data[0].v === 1, total: calls.length };
+  });
+  expect(result).toEqual({
+    afterBurst: 1, isolated: true, differentQuery: 2, afterExpiry: 3, firstError: 'SyntaxError', retriedOk: true, total: 5,
+  });
+});

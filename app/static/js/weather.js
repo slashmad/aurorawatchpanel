@@ -1,6 +1,7 @@
 // app/static/js/weather.js
 
 import { getLocation, getSunData, getMoonData } from './state.js';
+import { fetchShared } from './shared_fetch.js';
 
 function getCoords() {
   const { lat, lon, tz } = getLocation();
@@ -107,8 +108,9 @@ async function fetchWeatherForecast() {
   } else if (loc.name) {
     url += `&place=${encodeURIComponent(loc.name)}`;
   }
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("Kunde inte hämta väderdata från backend");
+  // showWeather() and updateWeather() both run on startup and location change.
+  const res = await fetchShared(url);
+  if (!res.ok) throw new Error("Could not fetch weather data from the backend");
   return await res.json();
 }
 

@@ -20,6 +20,7 @@ import { updateCoronalHoleCard } from './coronal_hole.js';
 import { updateSunspotCard } from './sunspot.js';
 import { syncDashboardPanelOwnership } from './dashboard_panels.js';
 import { setupPageFreshness } from './page_freshness.js';
+import { fetchShared } from './shared_fetch.js';
 
 // Desktop dashboard layout; must match the 1350px breakpoint in style.css.
 const desktopLayoutQuery = window.matchMedia('(min-width: 1350px)');
@@ -221,7 +222,7 @@ function getStats(arr, periodMinutes, key) {
   };
 }
 
-  const kpRes = await fetch('/kp/timeseries?hours=12');
+  const kpRes = await fetchShared('/kp/timeseries?hours=12');
   const kpJson = await kpRes.json();
   let kp = 0, kp1h = {}, kp3h = {}, kp6h = {}, kp12h = {};
   if (kpJson.data && kpJson.data.length) {
@@ -234,7 +235,7 @@ function getStats(arr, periodMinutes, key) {
   }
 
   // --- HP30 ---
-  const hpRes = await fetch('/hp30/timeseries?hours=12');
+  const hpRes = await fetchShared('/hp30/timeseries?hours=12');
   const hpJson = await hpRes.json();
   let hp30 = 0, hp30_1h = {}, hp30_3h = {}, hp30_6h = {}, hp30_12h = {};
   if (hpJson.data && hpJson.data.length) {
