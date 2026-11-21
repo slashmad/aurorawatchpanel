@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "build": "esbuild app/static/js/main.js --bundle --format=esm --minify --outfile=app/static/js/main.min.js",
-    "check:js": "node --check app/static/js/main.js && node --check app/static/js/images.js && node --check app/static/js/main.min.js",
+    "check:js": "node --check app/static/js/main.js && node --check app/static/js/images.js",
+    "pretest:browser": "npm run build",
     "test:browser": "playwright test"
   },
   "devDependencies": {
