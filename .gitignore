@@ -24,7 +24,6 @@ Thumbs.db
 
 # Generated scientific and camera data
 app/data/images/
-app/data/moon/
 app/data/noaa_anim/
 app/data/suvi-timelapse/
 app/data/tmp/

@@ -16,10 +16,14 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+## NASA moon phase images
+
+Files under `app/data/moon/` are moon phase renderings from NASA's Scientific Visualization Studio. NASA imagery is generally not subject to copyright in the United States; use follows the [NASA Images and Media Usage Guidelines](https://www.nasa.gov/nasa-brand-center/images-and-media/). NASA does not endorse this project.
+
 ## NOAA visual identity
 
 `app/data/svg/noaa_logo.svg` is used only to identify NOAA-linked content. NOAA names and visual identity remain subject to NOAA and United States government policies and are not covered by this project's MIT license.
 
 ## External scientific imagery
 
-Downloaded NOAA, NASA, Helioviewer, observatory, and all-sky imagery is runtime data and is excluded from this repository. Users are responsible for the terms attached to each upstream data product.
+Apart from the moon phase images above, downloaded NOAA, NASA, Helioviewer, observatory, and all-sky imagery is runtime data and is excluded from this repository. Users are responsible for the terms attached to each upstream data product.
