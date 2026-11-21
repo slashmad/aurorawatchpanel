@@ -6,13 +6,15 @@
     "check:js": "node --check app/static/js/main.js && node --check app/static/js/images.js",
     "pretest:browser": "npm run build",
     "test:browser": "playwright test",
-    "vendor": "node scripts/vendor-highcharts.mjs"
+    "vendor": "node scripts/vendor-highcharts.mjs && node scripts/vendor-fontawesome.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1",
     "esbuild": "0.28.1"
   },
   "dependencies": {
-    "highcharts": "13.1.1"
+    "@fortawesome/fontawesome-free": "6.5.0",
+    "highcharts": "13.1.1",
+    "subset-font": "2.9.0"
   }
 }

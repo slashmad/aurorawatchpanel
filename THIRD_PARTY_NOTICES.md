@@ -8,6 +8,10 @@ The navigation icons (`app/static/nav-icons/`) and the favicon (`app/static/icon
 
 Charts are drawn with [Highcharts](https://www.highcharts.com/) by Highsoft AS. Highcharts is not distributed with this repository: `npm run vendor` copies the version pinned in `package.json` from the npm package into `app/static/vendor/` (ignored by Git). Highcharts is licensed separately under the [Highcharts license](https://www.highcharts.com/license), which is free for personal, school and non-profit use; other use requires a commercial license from Highsoft.
 
+## Font Awesome Free
+
+Interface icons come from [Font Awesome Free](https://fontawesome.com) 6.5.0 by Fonticons, Inc. (icons: CC BY 4.0, font: SIL OFL 1.1, code: MIT). `npm run vendor` builds a subset with only the icons the dashboard uses into `app/static/vendor/fontawesome/` (ignored by Git), keeping the license header and `LICENSE.txt`.
+
 ## Meteocons weather icons
 
 Files under `app/data/icons/` originate from [Meteocons](https://github.com/basmilius/weather-icons).

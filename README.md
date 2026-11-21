@@ -109,7 +109,7 @@ The SDO collectors can generate very large datasets. Define and monitor a retent
    docker compose up --build -d
    ```
 
-6. Install the self-hosted chart library. Highcharts (version pinned in `package.json`) is served from `app/static/vendor/`, which is not tracked by Git. Run this once after every checkout and after a Highcharts version change; it only needs Docker:
+6. Install the self-hosted front-end libraries. Highcharts and a Font Awesome subset with the icons in use (versions pinned in `package.json`) are served from `app/static/vendor/`, which is not tracked by Git. Run this once after every checkout and after a Highcharts version change; it only needs Docker:
 
    ```bash
    docker run --rm -v "$PWD":/w -w /w node:22-alpine sh -c "npm ci --omit=dev && npm run vendor"

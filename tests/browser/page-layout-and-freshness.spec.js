@@ -386,7 +386,7 @@ test('section errors are shown per code and cleared on the next success', async 
   });
 });
 
-test('Highcharts is self-hosted and pinned, with no request to the Highcharts CDN', async ({ page }) => {
+test('Highcharts and Font Awesome are self-hosted and pinned, with no CDN requests', async ({ page }) => {
   const external = [];
   page.on('request', request => {
     const url = new URL(request.url());
@@ -409,6 +409,20 @@ test('Highcharts is self-hosted and pinned, with no request to the Highcharts CD
   expect(await page.evaluate(() => typeof window.Highcharts.seriesTypes.arearange)).toBe('function');
   await expect(page.locator('.section-error')).toHaveCount(0);
   expect(external.filter(host => host.includes('highcharts'))).toEqual([]);
+
+  // Font Awesome comes from the self-hosted subset, not from cdnjs.
+  expect(external.filter(host => host.includes('cdnjs'))).toEqual([]);
+  const icon = await page.evaluate(async () => {
+    await document.fonts.ready;
+    const el = document.querySelector('.fa-circle-info');
+    const before = getComputedStyle(el, '::before');
+    return {
+      loaded: document.fonts.check('900 16px "Font Awesome 6 Free"'),
+      family: getComputedStyle(el).fontFamily,
+      glyph: before.content.codePointAt(1).toString(16),
+    };
+  });
+  expect(icon).toEqual({ loaded: true, family: '"Font Awesome 6 Free"', glyph: 'f05a' });
 });
 
 test('solar images refresh quietly once stale, without the loading placeholder', async ({ page }) => {
