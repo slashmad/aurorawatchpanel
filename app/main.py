@@ -985,6 +985,30 @@ def solarwind_timeseries(param: str, hours: int = 3):
         db.close()
     return {"data": [{"time": r["timestamp"], "value": r[param]} for r in rows if r[param] is not None]}
 
+# Magnetometer charts are a few hundred pixels wide; FMI alone delivers ~4,300
+# points per station for 12 h at 10 s resolution. Series are reduced to at most
+# MAGNETOMETER_MAX_POINTS per station, keeping every bucket's minimum and maximum
+# (with their own timestamps) so spikes stay exact, plus the first and the last
+# point (the forecast reads the latest value).
+MAGNETOMETER_MAX_POINTS = 600
+
+
+def downsample_min_max(points, max_points=MAGNETOMETER_MAX_POINTS, key="value"):
+    if len(points) <= max_points:
+        return points
+    inner = points[1:-1]
+    buckets = max(1, (max_points - 2) // 2)
+    size = -(-len(inner) // buckets)  # ceil division
+    out = [points[0]]
+    for start in range(0, len(inner), size):
+        chunk = inner[start:start + size]
+        lo = min(range(len(chunk)), key=lambda i: chunk[i][key])
+        hi = max(range(len(chunk)), key=lambda i: chunk[i][key])
+        out.extend(chunk[i] for i in sorted({lo, hi}))
+    out.append(points[-1])
+    return out
+
+
 @app.get("/magneto/timeseries_multi")
 def magneto_timeseries_multi(
     stations: str,
@@ -1011,10 +1035,10 @@ def magneto_timeseries_multi(
                 values = [r[col] for r in rows if r[col] is not None]
                 if rows and values:
                     base = sum(values) / len(values)
-                    data[st] = [
+                    data[st] = downsample_min_max([
                         {"time": r["timestamp"], "value": round(r[col] - base, 2)}
                         for r in rows if r[col] is not None
-                    ]
+                    ])
     finally:
         db.close()
     return {"data": data}
@@ -1114,10 +1138,10 @@ def magneto_fmi_timeseries(
                 values = [r[comp] for r in rows if r[comp] is not None]
                 if rows and values:
                     base = sum(values) / len(values)
-                    data[st] = [
+                    data[st] = downsample_min_max([
                         {"time": r["timestamp"], "value": round(r[comp] - base, 2)}
                         for r in rows if r[comp] is not None
-                    ]
+                    ])
     finally:
         db.close()
     return {"data": data}
@@ -1146,10 +1170,10 @@ def magneto_global_timeseries(
                 values = [r[comp] for r in rows if r[comp] is not None]
                 if rows and values:
                     base = sum(values) / len(values)
-                    data[st] = [
+                    data[st] = downsample_min_max([
                         {"time": r["timestamp"], "value": round(r[comp] - base, 2)}
                         for r in rows if r[comp] is not None
-                    ]
+                    ])
     finally:
         db.close()
     return {"data": data}

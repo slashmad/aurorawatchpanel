@@ -1160,3 +1160,77 @@ class ReplayDayEndpointTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MagnetometerDownsamplingTests(unittest.TestCase):
+    @staticmethod
+    def series(n):
+        # Deterministic wiggle with one large positive and one large negative spike.
+        points = [{"time": f"t{i:06d}", "value": round(((i * 37) % 101) / 10 - 5, 2)} for i in range(n)]
+        points[n // 3]["value"] = 250.0
+        points[2 * n // 3]["value"] = -310.0
+        return points
+
+    def test_short_series_are_returned_unchanged(self):
+        points = self.series(600)
+        self.assertIs(main.downsample_min_max(points), points)
+
+    def test_long_series_keep_bounds_order_extremes_and_endpoints(self):
+        for n in (601, 4300, 8640, 100_000):
+            with self.subTest(n=n):
+                points = self.series(n)
+                reduced = main.downsample_min_max(points)
+                self.assertLessEqual(len(reduced), main.MAGNETOMETER_MAX_POINTS)
+                self.assertIs(reduced[0], points[0])
+                self.assertIs(reduced[-1], points[-1])
+                self.assertEqual([p["time"] for p in reduced], sorted(p["time"] for p in reduced))
+                self.assertEqual(len({p["time"] for p in reduced}), len(reduced))
+                self.assertIn(250.0, [p["value"] for p in reduced])
+                self.assertIn(-310.0, [p["value"] for p in reduced])
+                originals = {id(p) for p in points}
+                self.assertTrue(all(id(p) in originals for p in reduced))
+
+    def test_every_bucket_extreme_is_kept(self):
+        points = self.series(4300)
+        reduced = main.downsample_min_max(points, max_points=102)  # 50 buckets
+        inner = points[1:-1]
+        size = -(-len(inner) // 50)
+        kept = {p["time"] for p in reduced}
+        for start in range(0, len(inner), size):
+            chunk = inner[start:start + size]
+            self.assertIn(min(chunk, key=lambda p: p["value"])["time"], kept)
+            self.assertIn(max(chunk, key=lambda p: p["value"])["time"], kept)
+
+
+class MagnetometerEndpointDownsamplingTests(unittest.TestCase):
+    def rows(self, n, column):
+        start = datetime(2026, 8, 2, 0, 0, 0)
+        from datetime import timedelta
+        return [{"timestamp": start + timedelta(seconds=10 * i), column: 100.0 + (i % 50)} for i in range(n)]
+
+    def call(self, endpoint, column, n, **kwargs):
+        database = FakeDatabase(rows=self.rows(n, column))
+        with (
+            patch.object(main, "get_db", return_value=database),
+            patch.object(main, "datetime") as datetime_mock,
+        ):
+            datetime_mock.utcnow.return_value = datetime(2026, 8, 2, 12, 0, 0)
+            return endpoint(**kwargs), database
+
+    def test_fmi_global_and_multi_series_are_bounded_with_exact_latest_value(self):
+        cases = (
+            (main.magneto_fmi_timeseries, "x", {"stations": "KEV,SOD", "hours": 12}),
+            (main.magneto_global_timeseries, "x", {"stations": "BOU", "hours": 12}),
+            (main.magneto_timeseries_multi, "kirx", {"stations": "KIR", "hours": 12, "component": "x"}),
+        )
+        for endpoint, column, kwargs in cases:
+            with self.subTest(endpoint=endpoint.__name__):
+                result, database = self.call(endpoint, column, 4300, **kwargs)
+                raw = self.rows(4300, column)
+                base = sum(r[column] for r in raw) / len(raw)
+                for station, series in result["data"].items():
+                    self.assertLessEqual(len(series), main.MAGNETOMETER_MAX_POINTS)
+                    self.assertEqual(series[-1]["time"], raw[-1]["timestamp"])
+                    self.assertEqual(series[-1]["value"], round(raw[-1][column] - base, 2))
+                    self.assertEqual(series[0]["time"], raw[0]["timestamp"])
+                self.assertEqual(database.close_count, 1)
