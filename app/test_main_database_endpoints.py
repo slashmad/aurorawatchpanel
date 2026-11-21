@@ -1234,3 +1234,14 @@ class MagnetometerEndpointDownsamplingTests(unittest.TestCase):
                     self.assertEqual(series[-1]["value"], round(raw[-1][column] - base, 2))
                     self.assertEqual(series[0]["time"], raw[0]["timestamp"])
                 self.assertEqual(database.close_count, 1)
+
+
+class IndexRouteTests(unittest.TestCase):
+    def test_index_answers_get_and_head(self):
+        client = TestClient(main.app)
+        get = client.get("/")
+        head = client.head("/")
+        self.assertEqual(get.status_code, 200)
+        self.assertEqual(head.status_code, 200)
+        self.assertIn("text/html", head.headers["content-type"])
+        self.assertEqual(head.content, b"")

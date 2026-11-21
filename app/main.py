@@ -67,7 +67,8 @@ app.mount("/allsky-images", StaticFiles(directory=str(ALLSKY_FS_ROOT)), name="al
 
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 
-@app.get("/", response_class=HTMLResponse)
+# HEAD too: uptime monitors, link checkers and the README status badge use it.
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def index(request: Request):
     images = {"SDO/AIA 193": [], "SDO/AIA 211": [], "SDO/AIA 171": [], "SDO/AIA 304": [], "SDO/AIA 131": [], "SDO/AIA HMIIF": [], "Synoptic Map": []}
     return templates.TemplateResponse(
