@@ -10,7 +10,13 @@ import pytz
 import requests
 from skyfield.api import Star, load, Topos, EarthSatellite, wgs84, utc
 
-from skyfield_astro import get_sun_info, get_moon_info, get_sun_moon_info, get_object_events
+from skyfield_astro import (
+    get_moon_info,
+    get_object_events,
+    get_sun_info,
+    get_sun_moon_info,
+    get_timescale_and_ephemeris,
+)
 
 router = APIRouter()
 
@@ -63,7 +69,7 @@ def get_iss_tle():
     ]
 
 @router.get("/skyfield-astro")
-async def skyfield_astro(lat: float, lon: float, tz: str = "Europe/Stockholm"):
+def skyfield_astro(lat: float, lon: float, tz: str = "Europe/Stockholm"):
     """
     Legacy endpoint: return both sun and moon data in a single JSON object.
     """
@@ -74,7 +80,7 @@ async def skyfield_astro(lat: float, lon: float, tz: str = "Europe/Stockholm"):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.get("/sun")
-async def sun_endpoint(lat: float, lon: float, tz: str = "Europe/Stockholm"):
+def sun_endpoint(lat: float, lon: float, tz: str = "Europe/Stockholm"):
     """
     Return only sun data (rise, set, max, and current alt/az).
     """
@@ -85,7 +91,7 @@ async def sun_endpoint(lat: float, lon: float, tz: str = "Europe/Stockholm"):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.get("/moon")
-async def moon_endpoint(lat: float, lon: float, tz: str = "Europe/Stockholm"):
+def moon_endpoint(lat: float, lon: float, tz: str = "Europe/Stockholm"):
     """
     Return only moon data (rise, set, max, current alt/az, phase info).
     """
@@ -96,7 +102,7 @@ async def moon_endpoint(lat: float, lon: float, tz: str = "Europe/Stockholm"):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.get("/skyfield-altitudes")
-async def skyfield_altitudes(
+def skyfield_altitudes(
     lat: float,
     lon: float,
     tz: str = "Europe/Stockholm",
@@ -109,7 +115,7 @@ async def skyfield_altitudes(
     return get_sun_moon_altitudes_24h(lat, lon, tz, step_min)
 
 @router.get("/batch")
-async def astro_batch(
+def astro_batch(
     names: str = Query(..., description="Komma-separerad lista, t.ex. Venus,Mars,Jupiter,Sirius"),
     lat: float = Query(63.9),
     lon: float = Query(20.5),
@@ -120,8 +126,7 @@ async def astro_batch(
     name-listan kan innehålla planeter, stjärnor (från katalog), Messier, 'ISS', 'Perseids', 'Geminids', etc.
     """
     results = {}
-    ts = load.timescale()
-    eph = load('de421.bsp')
+    ts, eph = get_timescale_and_ephemeris()
     observer = eph['earth'] + Topos(latitude_degrees=lat, longitude_degrees=lon)
     tzinfo = pytz.timezone(tz)
     today = datetime.now(tzinfo).date()
@@ -248,7 +253,7 @@ async def astro_batch(
     return results
 
 @router.get("/azimuth-batch")
-async def azimuth_batch(
+def azimuth_batch(
     names: str = Query(..., description="Komma-separerad lista t.ex. Sun,Moon,Venus,Mars,Jupiter,Perseids,Geminids"),
     lat: float = Query(...),
     lon: float = Query(...),
@@ -259,8 +264,7 @@ async def azimuth_batch(
     Nu även stöd för meteorregn (Perseids, Geminids, m.fl.).
     """
     results = {}
-    ts = load.timescale()
-    eph = load('de421.bsp')
+    ts, eph = get_timescale_and_ephemeris()
     earth = eph['earth']
     topos = Topos(latitude_degrees=lat, longitude_degrees=lon)
     observer = earth + topos
@@ -426,8 +430,7 @@ async def azimuth_batch(
 
 
 def get_iss_events(lat, lon, tz_str):
-    ts = load.timescale()
-    eph = load('de421.bsp')
+    ts, eph = get_timescale_and_ephemeris()
     tle = get_iss_tle()
     satellite = EarthSatellite(tle[1], tle[2], tle[0], ts)
     topos = Topos(latitude_degrees=lat, longitude_degrees=lon)

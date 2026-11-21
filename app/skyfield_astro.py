@@ -1,10 +1,56 @@
 # app/skyfield_astro.py
 
+import functools
+import threading
+import time as _time
+
 import pytz
 from skyfield.api import load, Topos
 from skyfield import almanac
 from datetime import datetime, timedelta, time
 import numpy as np
+
+
+@functools.lru_cache(maxsize=1)
+def get_timescale_and_ephemeris():
+    """Load the Skyfield timescale and DE421 ephemeris once per process."""
+    return load.timescale(), load('de421.bsp')
+
+
+# Short-lived result cache: one page load requests /astro/sun, /astro/moon and
+# /astro/skyfield-astro for the same location within a second or two.
+RESULT_TTL_SECONDS = 60
+_result_cache: dict = {}
+_result_cache_lock = threading.Lock()
+_RESULT_CACHE_MAX = 256
+
+
+def _clear_cache():
+    with _result_cache_lock:
+        _result_cache.clear()
+
+
+def _cached(kind, lat, lon, tz_str, compute):
+    """Return a copy of a cached result for (kind, rounded location, tz), computing on miss."""
+    key = (kind, round(float(lat), 3), round(float(lon), 3), tz_str)
+    now = _time.monotonic()
+    with _result_cache_lock:
+        hit = _result_cache.get(key)
+        if hit and now - hit[0] < RESULT_TTL_SECONDS:
+            return dict(hit[1])
+    value = compute()
+    with _result_cache_lock:
+        if len(_result_cache) >= _RESULT_CACHE_MAX:
+            _result_cache.clear()
+        _result_cache[key] = (now, value)
+    return dict(value)
+
+
+def _local_day_times(ts, tz, day, step_minutes):
+    """Skyfield Time array for local 'day' at step_minutes intervals, plus the local datetimes."""
+    local_midnight = datetime.combine(day, time.min)
+    local_times = [tz.localize(local_midnight + timedelta(minutes=m)) for m in range(0, 1440, step_minutes)]
+    return ts.from_datetimes([lt.astimezone(pytz.utc) for lt in local_times]), local_times
 
 def get_object_events(body, ts, eph, topos, observer, now, t0, t1):
     """
@@ -56,25 +102,15 @@ def get_object_events(body, ts, eph, topos, observer, now, t0, t1):
         # If something fails (e.g., high latitude with no rise/set), leave defaults
         pass
 
-    # 2) Calculate maximum altitude between midnight and 24:00 (every 20 minutes)
+    # 2) Calculate maximum altitude between midnight and 24:00 (every 20 minutes),
+    #    evaluated as one vectorized Skyfield call; the first maximum wins.
     try:
-        max_alt = -90.0
-        max_time_str = None
-        max_azimuth = None
-        for minute in range(0, 1440, 20):
-            # Build a datetime on today's date at "minute" past midnight in local tz
-            local_midnight = datetime.combine(now.date(), time.min)
-            local_time = now.tzinfo.localize(local_midnight + timedelta(minutes=minute))
-            t_sf = ts.from_datetime(local_time.astimezone(pytz.utc))
-            app = observer.at(t_sf).observe(body).apparent()
-            alt, az, _ = app.altaz()
-            if alt.degrees > max_alt:
-                max_alt = alt.degrees
-                max_time_str = local_time.strftime("%H:%M")
-                max_azimuth = az.degrees
-        result["max_altitude"] = round(max_alt, 1)
-        result["max_time"] = max_time_str if max_time_str is not None else "-"
-        result["max_azimuth"] = round(max_azimuth, 1) if max_azimuth is not None else "-"
+        times, local_times = _local_day_times(ts, now.tzinfo, now.date(), 20)
+        alt, az, _ = observer.at(times).observe(body).apparent().altaz()
+        i = int(np.argmax(alt.degrees))
+        result["max_altitude"] = round(float(alt.degrees[i]), 1)
+        result["max_time"] = local_times[i].strftime("%H:%M")
+        result["max_azimuth"] = round(float(az.degrees[i]), 1)
     except Exception:
         pass
 
@@ -92,6 +128,14 @@ def get_object_events(body, ts, eph, topos, observer, now, t0, t1):
 
 
 def get_sun_info(lat=63.9, lon=20.5, tz_str="Europe/Stockholm", twilight_type="civil"):
+    """Sun data for a location; cached for RESULT_TTL_SECONDS. See _compute_sun_info."""
+    return _cached(
+        f"sun:{twilight_type}", lat, lon, tz_str,
+        lambda: _compute_sun_info(lat, lon, tz_str, twilight_type),
+    )
+
+
+def _compute_sun_info(lat=63.9, lon=20.5, tz_str="Europe/Stockholm", twilight_type="civil"):
     """
     Return only sun-specific data (rise, set, max, and current alt/az).
 
@@ -122,9 +166,8 @@ def get_sun_info(lat=63.9, lon=20.5, tz_str="Europe/Stockholm", twilight_type="c
           - "nightlength"     : "HH:MM" or None
           - "tz"              : string (same as tz_str)
     """
-    # 1) Load ephemeris and timescale
-    ts = load.timescale()
-    eph = load('de421.bsp')
+    # 1) Shared ephemeris and timescale
+    ts, eph = get_timescale_and_ephemeris()
     earth = eph['earth']
     sun = eph['sun']
 
@@ -229,9 +272,24 @@ def moon_phase_label(illum, is_waxing):
 
 
 def get_moon_info(lat=63.9, lon=20.5, tz_str="Europe/Stockholm"):
+    """Moon data for a location; cached for RESULT_TTL_SECONDS. See _compute_moon_info."""
+    return _cached("moon", lat, lon, tz_str, lambda: _compute_moon_info(lat, lon, tz_str))
 
-    ts = load.timescale()
-    eph = load('de421.bsp')
+
+def next_full_moon_date(ts, eph, now):
+    """Local date (YYYY-MM-DD) of the first full moon at or after 'now', or "-"."""
+    t0 = ts.from_datetime(now.astimezone(pytz.utc))
+    t1 = ts.from_datetime((now + timedelta(days=32)).astimezone(pytz.utc))
+    times, phases = almanac.find_discrete(t0, t1, almanac.moon_phases(eph))
+    for t, phase in zip(times, phases):
+        if phase == 2:  # 0 new, 1 first quarter, 2 full, 3 last quarter
+            return t.utc_datetime().astimezone(now.tzinfo).strftime("%Y-%m-%d")
+    return "-"
+
+
+def _compute_moon_info(lat=63.9, lon=20.5, tz_str="Europe/Stockholm"):
+
+    ts, eph = get_timescale_and_ephemeris()
     earth = eph['earth']
     sun = eph['sun']
     moon = eph['moon']
@@ -291,27 +349,10 @@ def get_moon_info(lat=63.9, lon=20.5, tz_str="Europe/Stockholm"):
     is_waxing = bool(phase_angle < np.pi)
     moon_phase_label_value = moon_phase_label(illum, is_waxing)
 
-    # 6) Find next full moon (sök när illuminationen är maximal)
-    next_fullmoon = "-"
-    best_phase = 0
-    best_dt = None
-    for i in range(1, 32):
-        for hour in [0, 6, 12, 18]:
-            dt_test = now + timedelta(days=i, hours=hour)
-            t_test = ts.from_datetime(dt_test.astimezone(pytz.utc))
-            sun_vec_test  = (earth + topos).at(t_test).observe(sun).apparent().position.km
-            moon_vec_test = (earth + topos).at(t_test).observe(moon).apparent().position.km
-            phase_test = (1 - np.cos(
-                np.arccos(
-                    np.dot(sun_vec_test, moon_vec_test) /
-                    (np.linalg.norm(sun_vec_test) * np.linalg.norm(moon_vec_test))
-                )
-            )) / 2
-            if phase_test > best_phase:
-                best_phase = phase_test
-                best_dt = dt_test
-    if best_dt:
-        next_fullmoon = best_dt.strftime("%Y-%m-%d")
+    # 6) Next full moon: exact lunar-phase search. The former 6-hourly sampling
+    #    picked the "fullest" moon within 31 days, which could skip the nearest
+    #    full moon (e.g. in favour of a lunar eclipse a month later).
+    next_fullmoon = next_full_moon_date(ts, eph, now)
 
     # 7) Return only moon-related keys
     return {
@@ -337,46 +378,21 @@ def get_sun_moon_altitudes_24h(lat, lon, tz_str="Europe/Stockholm", step_min=60)
     """
     Return arrays of sun & moon altitudes for the next 24 hours at 'step_min' intervals.
     """
-    # 1) Initialize Skyfield timescale and ephemeris
-    ts = load.timescale()
-    eph = load('de421.bsp')
-    earth = eph['earth']
+    ts, eph = get_timescale_and_ephemeris()
+    observer = eph['earth'] + Topos(latitude_degrees=lat, longitude_degrees=lon)
 
-    # 2) Build Topos/observer for given lat/lon
-    topos = Topos(latitude_degrees=lat, longitude_degrees=lon)
-    observer = earth + topos
-
-    # 3) Set local tz and today’s date
-    import pytz
-    from datetime import datetime, timedelta
     tz = pytz.timezone(tz_str)
-    now = datetime.now(tz)
-    today = now.date()
+    today = datetime.now(tz).date()
 
-    # 4) Compute 24h range in UTC for Skyfield
-    t0 = ts.utc(now.year, now.month, now.day)
-    t1 = ts.utc(now.year, now.month, now.day + 1)
-
-    # 5) Build list of times at step_min intervals (local times)
-    times_local = []
-    alt_sun_list = []
-    alt_moon_list = []
-    time_labels = []
-    for minute in range(0, 1440, step_min):
-        local_dt = tz.localize(datetime.combine(today, datetime.min.time()) + timedelta(minutes=minute))
-        sf_t = ts.from_datetime(local_dt.astimezone(pytz.utc))
-        # Sun altitude
-        sun_alt = observer.at(sf_t).observe(eph['sun']).apparent().altaz()[0].degrees
-        # Moon altitude
-        moon_alt = observer.at(sf_t).observe(eph['moon']).apparent().altaz()[0].degrees
-        alt_sun_list.append(round(sun_alt, 1))
-        alt_moon_list.append(round(moon_alt, 1))
-        time_labels.append(local_dt.strftime("%H:%M"))
+    # Local-day samples at step_min intervals, one vectorized call per body.
+    times, local_times = _local_day_times(ts, tz, today, step_min)
+    sun_alt = observer.at(times).observe(eph['sun']).apparent().altaz()[0].degrees
+    moon_alt = observer.at(times).observe(eph['moon']).apparent().altaz()[0].degrees
 
     return {
-        "times": time_labels,
-        "sun_altitudes": alt_sun_list,
-        "moon_altitudes": alt_moon_list,
+        "times": [lt.strftime("%H:%M") for lt in local_times],
+        "sun_altitudes": [round(float(a), 1) for a in sun_alt],
+        "moon_altitudes": [round(float(a), 1) for a in moon_alt],
         "tz": tz_str
     }
 
