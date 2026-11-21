@@ -1,5 +1,5 @@
 // ---- app/static/js/main.js ----
-import { getLocation, getSunData, getMoonData } from './state.js';
+import { getLocation, getSunData, getMoonData, fetchAndStoreSunMoon } from './state.js';
 import { setupLocation } from './location.js';
 import { showWeather, showInPlaceTime, updateWeather } from './weather.js';
 import { setupSynopticOverlay } from './synoptic.js';
@@ -19,6 +19,11 @@ import { drawAstroMasterGraph } from './skyfield_graph.js';
 import { updateCoronalHoleCard } from './coronal_hole.js';
 import { updateSunspotCard } from './sunspot.js';
 import { syncDashboardPanelOwnership } from './dashboard_panels.js';
+import { setupPageFreshness } from './page_freshness.js';
+
+// Desktop dashboard layout; must match the 1350px breakpoint in style.css.
+const desktopLayoutQuery = window.matchMedia('(min-width: 1350px)');
+const isDesktopLayout = () => desktopLayoutQuery.matches;
 
 window.updateSunspotCard = updateSunspotCard;
 window.lightPollutionLoaded = false;
@@ -1004,7 +1009,7 @@ function openLightPollutionIframe() {
 }
 
 function setupDashboardPanels() {
-  syncDashboardPanelOwnership(window.innerWidth >= 1350);
+  syncDashboardPanelOwnership(isDesktopLayout());
 }
 
 // Rättar eventbindning för alla solar-paneler, även i dashboard
@@ -1012,7 +1017,7 @@ function rebindSolarPanelEvents() {
   // Selects/date-inputs – uppdatera bilderna vid ändring (dashboard-läge).
   document.querySelectorAll('#solar-panel-timelapse-type, #solar-panel-timelapse-date').forEach(inp => {
     inp.onchange = function () {
-      if (window.innerWidth >= 1350 && typeof window.showSolarImagesInline === "function") {
+      if (isDesktopLayout() && typeof window.showSolarImagesInline === "function") {
         window.showSolarImagesInline();
       }
     };
@@ -1093,7 +1098,7 @@ function setupPanelNavigation() {
   }
 
   function setActive(section, { refresh = true } = {}) {
-    if (window.innerWidth >= 1350) {
+    if (isDesktopLayout()) {
       setActiveDashboard(section, refresh);
     } else {
       setActiveTabPanel(section, refresh);
@@ -1103,12 +1108,29 @@ function setupPanelNavigation() {
   btns.forEach(btn => btn.addEventListener('click', () => setActive(btn.dataset.section)));
   setActive('location', { refresh: false });
 
-  window.addEventListener('resize', () => {
+  // Re-layout only when the viewport crosses the desktop breakpoint. Ordinary
+  // resizes need no work: chart widths follow their containers through
+  // Highcharts' own ResizeObserver, and no data is refetched.
+  desktopLayoutQuery.addEventListener('change', () => {
     const activeBtn = document.querySelector('.leftbar-btn.active');
     const section = activeBtn?.dataset.section || "location";
     setupDashboardPanels();
     setActive(section, { refresh: false });
   });
+}
+
+// Periodic in-place refresh of location-bound data (sun/moon, weather, forecast).
+async function refreshLocationData() {
+  await fetchAndStoreSunMoon();
+  await showWeather();
+  if (typeof window.setAuroraForecastLocation === "function") {
+    await window.setAuroraForecastLocation();
+  }
+}
+
+// Day-based cards; run by page_freshness only after local midnight and when idle.
+function refreshDailyCards() {
+  return Promise.all([updateCoronalHoleCard(), updateSunspotCard()]);
 }
 
 // ---- AllSky latest image (supports dashboard cloning) ----
@@ -2310,4 +2332,7 @@ if (btn) {
   setInterval(() => setupMagnetometerFMI(), 300000);
   setInterval(() => fetchKpAndHp30(), 300000);
   setInterval(() => loadSolarEvents(), 300000);
+
+  // Replaces the former hourly full-page reload; see page_freshness.js.
+  setupPageFreshness({ refreshData: refreshLocationData, refreshDaily: refreshDailyCards });
 });
