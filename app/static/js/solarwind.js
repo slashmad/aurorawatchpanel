@@ -16,6 +16,11 @@ const swParams = [
 ];
 
 const swCharts = {};
+let solarwindRefreshTimer = null;
+const boundSolarwindControls = new WeakSet();
+const solarwindRefreshCallbacks = new Map(
+  swParams.map(({ key, unit }) => [key, () => fetchAndRenderSW(key, unit)])
+);
 
 // SPEED
 function getSpeedColors(value) {
@@ -360,13 +365,23 @@ export async function fetchAndRenderSW(param, unit) {
 	}
 }
 
+function refreshAllSolarwindCharts() {
+  swParams.forEach(({ key }) => solarwindRefreshCallbacks.get(key)());
+}
+
 export function setupSolarwind() {
-  swParams.forEach(({ key, unit }) => {
+  swParams.forEach(({ key }) => {
     const select = document.getElementById(`sw-${key}-range`);
-    if (select) select.addEventListener('change', () => fetchAndRenderSW(key, unit));
-    fetchAndRenderSW(key, unit);
-    setInterval(() => fetchAndRenderSW(key, unit), 60_000);
+    if (select && !boundSolarwindControls.has(select)) {
+      select.addEventListener('change', solarwindRefreshCallbacks.get(key));
+      boundSolarwindControls.add(select);
+    }
   });
+
+  refreshAllSolarwindCharts();
+  if (solarwindRefreshTimer === null) {
+    solarwindRefreshTimer = setInterval(refreshAllSolarwindCharts, 60_000);
+  }
 }
 
 let byAuroraChart = null;

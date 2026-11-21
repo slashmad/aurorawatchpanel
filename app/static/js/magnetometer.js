@@ -20,6 +20,8 @@ export const IRF_STATIONS = [
 const EXCLUDE = [""];
 
 let magChart = null;
+let magnetometerRefreshTimer = null;
+const boundMagnetometerControls = new WeakSet();
 
 export async function fetchAndRenderMagIRF(period = 6, component = "x") {
   configureHighchartsTimezone();
@@ -141,21 +143,33 @@ const series = IRF_STATIONS
 }
 
 
+function updateMagnetometerChart() {
+  const periodSelect = document.getElementById('mag-kiruna-range');
+  const compSelect = document.getElementById('mag-kiruna-component');
+
+  return fetchAndRenderMagIRF(
+    periodSelect?.value || 6,
+    compSelect?.value || "x"
+  );
+}
+
+function bindMagnetometerControl(control) {
+  if (!control || boundMagnetometerControls.has(control)) return;
+
+  control.addEventListener('change', updateMagnetometerChart);
+  boundMagnetometerControls.add(control);
+}
+
 export function setupMagnetometer() {
   configureHighchartsTimezone();
   const periodSelect = document.getElementById('mag-kiruna-range');
   const compSelect = document.getElementById('mag-kiruna-component');
 
-  function updateChart() {
-    fetchAndRenderMagIRF(
-      periodSelect?.value || 6,
-      compSelect?.value || "x"
-    );
+  bindMagnetometerControl(periodSelect);
+  bindMagnetometerControl(compSelect);
+
+  updateMagnetometerChart();
+  if (magnetometerRefreshTimer === null) {
+    magnetometerRefreshTimer = setInterval(updateMagnetometerChart, 60000);
   }
-
-  if (periodSelect) periodSelect.addEventListener('change', updateChart);
-  if (compSelect) compSelect.addEventListener('change', updateChart);
-
-  updateChart();
-  setInterval(updateChart, 60000);
 }

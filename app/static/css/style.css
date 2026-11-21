@@ -653,14 +653,16 @@ html, body {
 	border-radius: 0.25em;
 	margin-bottom: 1.1em;
 }
-#timelapse-video-container video {
+#timelapse-overlay-video-container video,
+#solar-overlay-timelapse-video-container video {
 	max-width: 92vw;
 	max-height: 76vh;
 	border-radius: 0.25em;
 	background: #000;
 	box-shadow: 0 2px 18px #111;
 }
-#timelapse-close {
+#timelapse-overlay-close,
+#solar-overlay-timelapse-close {
 	position: absolute; top: 7px; right: 13px;
 	background: transparent;
 	color: #f66; font-size: 1.5em;
@@ -1367,7 +1369,8 @@ span:hover > .rt-tooltip {
 
 .img-overlay-close,
 #img-overlay-close,
-#timelapse-close,
+#timelapse-overlay-close,
+#solar-overlay-timelapse-close,
 #synoptic-close,
 #huxt-overlay-close,
 #img-overlay-prev,
@@ -1800,7 +1803,7 @@ span:hover > .rt-tooltip {
   flex-direction: column;
 }
 
-#astro-azimuth-map {
+.astro-azimuth-map {
   width: 100%;
   height: 100%;
   overflow: hidden;

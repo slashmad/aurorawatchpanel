@@ -7,6 +7,10 @@ venv/
 .venv/
 node_modules/
 dist/
+playwright-report/
+test-results/
+.coverage
+htmlcov/
 
 # OS and editors
 .DS_Store

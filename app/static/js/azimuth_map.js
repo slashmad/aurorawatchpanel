@@ -16,6 +16,21 @@ const OBJECTS = [
   { id: "geminids", name: "Geminids", icon: "☄️", color: "#7de0ff", arcOpacity: 0.5 }
 ];
 
+const azimuthMapStates = new WeakMap();
+
+function removeAzimuthMap(container) {
+  const state = azimuthMapStates.get(container);
+  if (!state) return;
+
+  if (state.resizeHandler) {
+    window.removeEventListener('resize', state.resizeHandler);
+    state.map.off('resize', state.resizeHandler);
+  }
+  state.map.remove();
+  if (window.astroAzimuthMap === state.map) window.astroAzimuthMap = null;
+  azimuthMapStates.delete(container);
+}
+
 // ---- Helper: plocka rätt objekt-data från batch
 function getObjData(obj, batch) {
   // batch["Venus"] eller batch["Moon"]
@@ -122,17 +137,15 @@ export async function drawAzimuthMap(containerId = "astro-azimuth-embed") {
   const container = document.getElementById(containerId);
   if (!container) return;
 
-  // Remove previous map/canvas
-  if (window.astroAzimuthMap) {
-    window.astroAzimuthMap.remove();
-    window.astroAzimuthMap = null;
-  }
-  const oldDiv = document.getElementById('astro-azimuth-map');
+  // Replace only this container's prior map and listener ownership.
+  removeAzimuthMap(container);
+  const oldDiv = container.querySelector('.astro-azimuth-map');
   if (oldDiv) oldDiv.remove();
 
   // Add new div
   const newDiv = document.createElement('div');
-  newDiv.id = 'astro-azimuth-map';
+  newDiv.id = `${containerId}-map`;
+  newDiv.className = 'astro-azimuth-map';
   newDiv.style.height = '400px';
   newDiv.style.position = 'relative';
   newDiv.style.borderRadius = '6px';
@@ -141,7 +154,8 @@ export async function drawAzimuthMap(containerId = "astro-azimuth-embed") {
 
   // Overlay-canvas
   const overlayCanvas = document.createElement('canvas');
-  overlayCanvas.id = 'astro-azimuth-overlay';
+  overlayCanvas.id = `${newDiv.id}-overlay`;
+  overlayCanvas.className = 'astro-azimuth-overlay';
   overlayCanvas.style.position = 'absolute';
   overlayCanvas.style.left = '0';
   overlayCanvas.style.top = '0';
@@ -152,7 +166,7 @@ export async function drawAzimuthMap(containerId = "astro-azimuth-embed") {
   newDiv.appendChild(overlayCanvas);
 
   // Leaflet map
-  let map = L.map('astro-azimuth-map', {
+  let map = L.map(newDiv, {
     center: [lat, lon],
     zoom: 10,
     zoomControl: false,
@@ -167,10 +181,17 @@ export async function drawAzimuthMap(containerId = "astro-azimuth-embed") {
     minZoom: 3,
     attribution: '&copy; OpenStreetMap, &copy; CARTO'
   }).addTo(map);
+  const state = { map, resizeHandler: null };
+  azimuthMapStates.set(container, state);
+  // Retain the legacy reference for external consumers of the most recently drawn map.
   window.astroAzimuthMap = map;
 
-  const controls = document.querySelector('.astro-azimuth-controls');
-  const times = document.querySelector('.astro-azimuth-times');
+  const controls = container.querySelector('.astro-azimuth-controls');
+  const times = container.querySelector('.astro-azimuth-times');
+  if (!controls || !times) {
+    removeAzimuthMap(container);
+    return;
+  }
 
   let selected = JSON.parse(localStorage.getItem('astroAzimuthObjs') || '{}');
   if (!selected || typeof selected !== "object") selected = {};
@@ -195,6 +216,7 @@ export async function drawAzimuthMap(containerId = "astro-azimuth-embed") {
   const names = OBJECTS.map(o => o.name).join(",");
   const res = await fetch(`/astro/azimuth-batch?names=${encodeURIComponent(names)}&lat=${lat}&lon=${lon}&tz=${encodeURIComponent(tz)}`);
   const batch = await res.json();
+  if (azimuthMapStates.get(container)?.map !== map) return;
 
   legend.innerHTML = '';
   Object.keys(selected)
@@ -222,20 +244,20 @@ export async function drawAzimuthMap(containerId = "astro-azimuth-embed") {
     });
 
   // Rita overlay på canvas
-  function resizeAndDrawOverlay() {
+  state.resizeHandler = function resizeAndDrawOverlay() {
     overlayCanvas.width = newDiv.offsetWidth;
     overlayCanvas.height = newDiv.offsetHeight;
     drawPixelAzimuthOverlay(overlayCanvas, selected, batch);
-  }
-  resizeAndDrawOverlay();
-  window.addEventListener('resize', resizeAndDrawOverlay);
-  map.on('resize', resizeAndDrawOverlay);
+  };
+  state.resizeHandler();
+  window.addEventListener('resize', state.resizeHandler);
+  map.on('resize', state.resizeHandler);
 
   // Overlay-panel UI
   renderOverlayPanel(controls, selected, (objId, show) => {
     selected[objId] = show;
     localStorage.setItem('astroAzimuthObjs', JSON.stringify(selected));
-    drawAzimuthMap(); // Redraw
+    drawAzimuthMap(containerId); // Redraw the same surface.
   });
 
   renderTimesOverlay(times, batch, selected);

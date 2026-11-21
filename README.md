@@ -131,14 +131,37 @@ Useful checks:
 
 ```bash
 docker compose config --services
-python3 -m compileall -q app
+.venv/bin/python -m pytest
+.venv/bin/python -m coverage run -m pytest
+.venv/bin/python -m coverage report
+.venv/bin/python -m ruff check app
+.venv/bin/python -m mypy app/test_images_list.py
+npm run check:js
+npm run test:browser
 git diff --check
 ```
+
+Install the reproducible development dependencies separately from production:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r app/requirements.lock.txt -r app/requirements-dev.txt
+npm ci
+npx playwright install chromium
+```
+
+When a compatible system Chromium is already installed, the browser test can use it without downloading another browser:
+
+```bash
+PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium-browser npm run test:browser
+```
+
+The default Ruff gate checks fatal parser and compiler-error classes across the existing application. Broader legacy lint and undefined-name cleanup is intentionally handled as separate, narrowly reviewed work. The similarly named `app/test_coronal_hole_mask.py` is an operational image-analysis script and is deliberately excluded from automatic pytest collection because importing it creates output directories.
 
 The production page loads `/static/js/main.min.js`. After changing `app/static/js/main.js`, regenerate it with the esbuild version used by the project:
 
 ```bash
-docker exec aurora-watch-backend esbuild static/js/main.js --bundle --format=esm --minify --outfile=static/js/main.min.js
+npm run build
 ```
 
 ## Security

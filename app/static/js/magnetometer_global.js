@@ -11,6 +11,8 @@ export const GLOBAL_MAG_STATIONS = [
 ];
 
 let globalChart = null;
+let globalRefreshTimer = null;
+const boundGlobalControls = new WeakSet();
 
 function configureHighchartsTimezone() {
   const { tz } = getLocation();
@@ -18,6 +20,10 @@ function configureHighchartsTimezone() {
 }
 
 export async function setupMagnetometerGlobal() {
+  if (globalRefreshTimer === null) {
+    globalRefreshTimer = setInterval(setupMagnetometerGlobal, 60000);
+  }
+
   configureHighchartsTimezone();
   const compSelect = document.getElementById("magneto-global-component");
   const rangeSelect = document.getElementById("magneto-global-range");
@@ -82,17 +88,13 @@ export async function setupMagnetometerGlobal() {
   });
 }
 
-// Byt event-funktionen till denna:
 export function setupMagnetometerGlobalEvents() {
   const compSelect = document.getElementById("magneto-global-component");
   const rangeSelect = document.getElementById("magneto-global-range");
-  if (compSelect) compSelect.addEventListener("change", setupMagnetometerGlobal);
-  if (rangeSelect) rangeSelect.addEventListener("change", setupMagnetometerGlobal);
-}
 
-// Initiera graf + events vid sidladdning
-document.addEventListener('DOMContentLoaded', () => {
-  setupMagnetometerGlobal();
-  setupMagnetometerGlobalEvents();
-  setInterval(() => setupMagnetometerGlobal(), 60000);
-});
+  [compSelect, rangeSelect].forEach(control => {
+    if (!control || boundGlobalControls.has(control)) return;
+    control.addEventListener("change", setupMagnetometerGlobal);
+    boundGlobalControls.add(control);
+  });
+}

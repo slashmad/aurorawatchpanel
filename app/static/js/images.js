@@ -115,19 +115,7 @@ function labelToContainer(label) {
 let sdoPlayInterval = null;
 
 export function showSDOOverlayWithSlider(label) {
-
-const arr = imageData[label];
-if (arr && arr.length > 1) {
-  for (let i = 0; i < arr.length; i++) {
-    const fname = arr[i].endsWith('_thumb.jpg') ? arr[i].replace('_thumb.jpg', '.jpg') : arr[i];
-    const url = `/images/${fname}`;
-    if (!sdoImageCache[url]) {
-      const img = new window.Image();
-      img.src = url;
-      sdoImageCache[url] = img;
-    }
-  }
-}
+  const arr = imageData[label];
 
   overlay = document.getElementById('img-overlay');
   overlayImg = document.getElementById('img-overlay-img');

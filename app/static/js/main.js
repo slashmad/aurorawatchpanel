@@ -9,6 +9,7 @@ import { drawDoubleGauge } from "./gauge_double.js";
 import { setupSolarwind, setupByAuroraScore } from './solarwind.js';
 import { setupMagnetometer } from './magnetometer.js';
 import { setupMagnetometerFMI, setupMagnetometerFMIEvents } from './magnetometer_fmi.js';
+import { setupMagnetometerUIT } from './magnetometer_uit.js';
 import { setupMagnetometerGlobal, setupMagnetometerGlobalEvents } from './magnetometer_global.js';
 import { updateAuroraForecasts } from './aurora_forecast.js';
 import { setupImages, setupOverlayClassic } from './images.js';
@@ -17,6 +18,7 @@ import { drawAzimuthMap } from './azimuth_map.js';
 import { drawAstroMasterGraph } from './skyfield_graph.js';
 import { updateCoronalHoleCard } from './coronal_hole.js';
 import { updateSunspotCard } from './sunspot.js';
+import { syncDashboardPanelOwnership } from './dashboard_panels.js';
 
 window.updateSunspotCard = updateSunspotCard;
 window.lightPollutionLoaded = false;
@@ -548,9 +550,9 @@ export function updateSolarLunarBox() {
 
 async function showTimelapseInOverlay(dateStr, typeStr) {
   const overlay = document.getElementById('timelapse-overlay');
-  const dateEl = overlay.querySelector('#timelapse-date');
-  const typeEl = overlay.querySelector('#timelapse-type');
-  const videoContainer = overlay.querySelector('#timelapse-video-container');
+  const dateEl = overlay.querySelector('#timelapse-overlay-date');
+  const typeEl = overlay.querySelector('#timelapse-overlay-type');
+  const videoContainer = overlay.querySelector('#timelapse-overlay-video-container');
 
   // Sätt värden
   if (dateEl && dateStr) dateEl.value = dateStr;
@@ -631,13 +633,13 @@ function enableZoomPanOnTimelapseVideo(overlaySel = '#timelapse-overlay') {
 // Solar/SDO timelapse
 document.getElementById('timelapse-show-btn')?.addEventListener('click', function() {
   // Hämta värden från panelens fält
-  const dateStr = document.getElementById('timelapse-date')?.value;
-  const typeStr = document.getElementById('timelapse-type')?.value;
+  const dateStr = document.getElementById('solar-panel-timelapse-date')?.value;
+  const typeStr = document.getElementById('solar-panel-timelapse-type')?.value;
   // Öppna overlayen
   document.getElementById('timelapse-overlay')?.classList.add('active');
-  // Sätt in exakt dessa i overlayens inputs (kan vara samma id – DOM tillåter dubblett om du kör i olika modaler)
-  let tlDate = document.querySelector('#timelapse-overlay #timelapse-date');
-  let tlType = document.querySelector('#timelapse-overlay #timelapse-type');
+  // Sätt in exakt dessa i overlayens inputs.
+  let tlDate = document.getElementById('timelapse-overlay-date');
+  let tlType = document.getElementById('timelapse-overlay-type');
   if (tlDate && dateStr) tlDate.value = dateStr;
   if (tlType && typeStr) tlType.value = typeStr;
   // Kör funktionen – nu garanterat rätt värden!
@@ -645,10 +647,10 @@ document.getElementById('timelapse-show-btn')?.addEventListener('click', functio
 });
 
 // Timelapse-overlay knappen (inne i overlay)
-document.getElementById('timelapse-show')?.addEventListener('click', function() {
+document.getElementById('timelapse-overlay-show')?.addEventListener('click', function() {
   const overlay = document.getElementById('timelapse-overlay');
-  const dateStr = overlay.querySelector('#timelapse-date')?.value;
-  const typeStr = overlay.querySelector('#timelapse-type')?.value;
+  const dateStr = overlay.querySelector('#timelapse-overlay-date')?.value;
+  const typeStr = overlay.querySelector('#timelapse-overlay-type')?.value;
   showTimelapseInOverlay(dateStr, typeStr);
 });
 // CONTINUOUS TIMELAPSE PLAYBACK (main.js)
@@ -665,9 +667,9 @@ document.getElementById('timelapse-play-continuous')?.addEventListener('click', 
   window._continuousAbort = false;
 
   const overlay = document.getElementById('timelapse-overlay');
-  const dateEl = overlay.querySelector('#timelapse-date');
-  const typeEl = overlay.querySelector('#timelapse-type');
-  const videoContainer = overlay.querySelector('#timelapse-video-container');
+  const dateEl = overlay.querySelector('#timelapse-overlay-date');
+  const typeEl = overlay.querySelector('#timelapse-overlay-type');
+  const videoContainer = overlay.querySelector('#timelapse-overlay-video-container');
   const startDate = dateEl.value;
   const type = typeEl.value;
   const today = new Date();
@@ -733,21 +735,21 @@ document.getElementById('timelapse-play-continuous')?.addEventListener('click', 
       this.querySelector('video')?.remove();
       var el = this.querySelector('.solar-timelapse-date');
 	  if (el) el.value = "";
-      (this.querySelector('#timelapse-video-container') || this.querySelector('#synoptic-video-container')).innerHTML = '';
+      (this.querySelector('#timelapse-overlay-video-container') || this.querySelector('#synoptic-video-container')).innerHTML = '';
     }
   });
 });
 document.addEventListener('keydown', e => {
   if (e.key === "Escape") {
     document.getElementById('timelapse-overlay')?.classList.remove('active');
-    document.getElementById('timelapse-video-container').innerHTML = '';
+    document.getElementById('timelapse-overlay-video-container').innerHTML = '';
     document.getElementById('synoptic-overlay')?.classList.remove('active');
     document.getElementById('synoptic-video-container').innerHTML = '';
   }
 });
-document.getElementById('timelapse-close')?.addEventListener('click', () => {
+document.getElementById('timelapse-overlay-close')?.addEventListener('click', () => {
   document.getElementById('timelapse-overlay')?.classList.remove('active');
-  document.getElementById('timelapse-video-container').innerHTML = '';
+  document.getElementById('timelapse-overlay-video-container').innerHTML = '';
 });
 document.getElementById('synoptic-close')?.addEventListener('click', () => {
   document.getElementById('synoptic-overlay')?.classList.remove('active');
@@ -845,35 +847,33 @@ window.showSolarImagesInline = async function () {
     typeInfo[t.id] = t.info || "";
   }
 
-  // Ladda bilder-data för SDO (du kan skippa window.imageData/indices om du inte behöver dem globalt)
+  // Fetch each product once and in parallel when the solar panel is opened.
   window.imageData = window.imageData || {};
   window.indices = window.indices || {};
-  for (const { label, id, type } of types) {
-    if (type === "sdo") {
-      try {
-        const res = await fetch(`/images/list?label=${encodeURIComponent(label)}&_=${Date.now()}`);
+  const productFiles = await Promise.all(types.map(async ({ label, id, type }) => {
+    try {
+      let res;
+      if (type === "enlil") {
+        res = await fetch(`/noaa_anim/list/${id}`);
+      } else if (type === "huxt") {
+        res = await fetch(`/huxt/list`);
+      } else {
+        res = await fetch(`/images/list?label=${encodeURIComponent(label)}&_=${Date.now()}`);
         const files = (await res.json()).files || [];
         window.imageData[label] = files;
         window.indices[label] = 0;
-      } catch {}
+        return files;
+      }
+      return (await res.json()).files || [];
+    } catch {
+      return [];
     }
-  }
-
+  }));
 
   let html = "";
-  for (const { label, id, type } of types) {
+  for (const [index, { label, id, type }] of types.entries()) {
+    const files = productFiles[index];
     try {
-      let res, files = [];
-      if (type === "enlil") {
-        res = await fetch(`/noaa_anim/list/${id}`);
-        files = (await res.json()).files || [];
-      } else if (type === "huxt") {
-        res = await fetch(`/huxt/list`);
-        files = (await res.json()).files || [];
-      } else {
-        res = await fetch(`/images/list?label=${encodeURIComponent(label)}&_=${Date.now()}`);
-        files = (await res.json()).files || [];
-      }
       if (files.length) {
         let mediaSrc = "";
         if (type === "enlil") {
@@ -1003,57 +1003,14 @@ function openLightPollutionIframe() {
   anchor.appendChild(iframe);
 }
 
-const DASHBOARD_SECTIONS = ["location"];
-
 function setupDashboardPanels() {
-  const dashboard = document.getElementById('dashboard-multipanel');
-  if (!dashboard) return;
-  if (window.innerWidth < 1350) return; // Gör inget på smal skärm!
-
-  const panels = [
-    { section: "location", col: "dashboard-location" },
-    { section: "solarwind", col: "dashboard-solarwind" },
-    { section: "magnetometer", col: "dashboard-magnetometer" },
-    { section: "solar", col: "dashboard-solar" },
-  ];
-
-  panels.forEach(({ section, col }) => {
-    const tabPanel = document.querySelector(`.tab-panel[data-section="${section}"]`);
-    const colDiv = document.getElementById(col);
-    if (tabPanel && colDiv) {
-      colDiv.innerHTML = "";
-      Array.from(tabPanel.children).forEach(child => {
-        colDiv.appendChild(child.cloneNode(true));
-      });
-    }
-  });
-
-  // Ladda om solarbilder om de finns i dashboard
-  if (typeof window.showSolarImagesInline === "function") {
-    setTimeout(() => window.showSolarImagesInline(), 40);
-  }
-  setTimeout(() => rebindSolarPanelEvents(), 60);
-  setTimeout(() => setupLocation(), 80);
+  syncDashboardPanelOwnership(window.innerWidth >= 1350);
 }
 
 // Rättar eventbindning för alla solar-paneler, även i dashboard
 function rebindSolarPanelEvents() {
-  // Ladda overlay från alla 'visa video'-knappar i både tab och dashboard
-  document.querySelectorAll('#timelapse-show-btn').forEach(btn => {
-    btn.onclick = function () {
-      const parent = btn.closest('.card');
-      const dateStr = parent?.querySelector('#timelapse-date')?.value;
-      const typeStr = parent?.querySelector('#timelapse-type')?.value;
-      document.getElementById('timelapse-overlay')?.classList.add('active');
-      let tlDate = document.querySelector('#timelapse-overlay #timelapse-date');
-      let tlType = document.querySelector('#timelapse-overlay #timelapse-type');
-      if (tlDate && dateStr) tlDate.value = dateStr;
-      if (tlType && typeStr) tlType.value = typeStr;
-      showTimelapseInOverlay(dateStr, typeStr);
-    };
-  });
-  // Selects/date-inputs – uppdatera bilderna vid ändring (dashboard-läge)
-  document.querySelectorAll('#timelapse-type, #timelapse-date').forEach(inp => {
+  // Selects/date-inputs – uppdatera bilderna vid ändring (dashboard-läge).
+  document.querySelectorAll('#solar-panel-timelapse-type, #solar-panel-timelapse-date').forEach(inp => {
     inp.onchange = function () {
       if (window.innerWidth >= 1350 && typeof window.showSolarImagesInline === "function") {
         window.showSolarImagesInline();
@@ -1062,6 +1019,97 @@ function rebindSolarPanelEvents() {
   });
 }
 window.rebindSolarPanelEvents = rebindSolarPanelEvents;
+
+let panelNavigationInitialized = false;
+
+function setupPanelNavigation() {
+  if (panelNavigationInitialized) return;
+
+  const btns = document.querySelectorAll('.leftbar-btn');
+  const panels = document.querySelectorAll('.tab-panel');
+  const dashboard = document.getElementById('dashboard-multipanel');
+  const panelsWrapper = document.querySelector('.tab-panels-wrapper');
+  if (!dashboard) return;
+
+  panelNavigationInitialized = true;
+
+  function showTabPanel(section) {
+    dashboard.classList.remove('active');
+    if (panelsWrapper) panelsWrapper.style.display = '';
+    panels.forEach(panel => panel.classList.toggle('active', panel.dataset.section === section));
+    btns.forEach(btn => btn.classList.toggle('active', btn.dataset.section === section));
+  }
+
+  function refreshStandalonePanel(section) {
+    if (section === "cloudmap") openCloudmapIframe();
+    if (section === "lightpollution") openLightPollutionIframe();
+    if (section === "solar" && typeof window.showSolarImagesInline === "function") {
+      window.showSolarImagesInline();
+    }
+    if (section === "objects-in-sky") drawAzimuthMap('astro-azimuth-embed');
+    if (section === "objects-in-sky-graph") drawAstroMasterGraph('astro-master-graph-embed');
+  }
+
+  function setActiveTabPanel(section, refresh) {
+    showTabPanel(section);
+    if (refresh) refreshStandalonePanel(section);
+  }
+
+  function setActiveDashboard(section, refresh) {
+    const allCols = Array.from(dashboard.children);
+    const dashboardColumn = {
+      solarwind: "dashboard-solarwind",
+      magnetometer: "dashboard-magnetometer",
+      solar: "dashboard-solar",
+    }[section];
+
+    if (section !== "location" && !dashboardColumn) {
+      showTabPanel(section);
+      if (refresh) refreshStandalonePanel(section);
+      return;
+    }
+
+    dashboard.classList.add('active');
+    if (panelsWrapper) panelsWrapper.style.display = 'none';
+    panels.forEach(panel => panel.classList.remove('active'));
+    btns.forEach(btn => btn.classList.toggle('active', btn.dataset.section === section));
+    allCols.forEach(col => {
+      col.style.display = section === "location" || col.id === dashboardColumn ? "flex" : "none";
+    });
+
+    if (!refresh) return;
+    if (section === "location") {
+      rebindSolarPanelEvents();
+    } else if (section === "solarwind") {
+      setupSolarwind();
+    } else if (section === "magnetometer") {
+      setupMagnetometer();
+      setupMagnetometerUIT();
+      setupMagnetometerFMI();
+      setupMagnetometerGlobal();
+    } else if (section === "solar" && typeof window.showSolarImagesInline === "function") {
+      window.showSolarImagesInline();
+    }
+  }
+
+  function setActive(section, { refresh = true } = {}) {
+    if (window.innerWidth >= 1350) {
+      setActiveDashboard(section, refresh);
+    } else {
+      setActiveTabPanel(section, refresh);
+    }
+  }
+
+  btns.forEach(btn => btn.addEventListener('click', () => setActive(btn.dataset.section)));
+  setActive('location', { refresh: false });
+
+  window.addEventListener('resize', () => {
+    const activeBtn = document.querySelector('.leftbar-btn.active');
+    const section = activeBtn?.dataset.section || "location";
+    setupDashboardPanels();
+    setActive(section, { refresh: false });
+  });
+}
 
 // ---- AllSky latest image (supports dashboard cloning) ----
 let allSkyTimer = null;
@@ -1961,6 +2009,8 @@ function initReplayOverlay() {
 
 document.addEventListener("DOMContentLoaded", async function() {
   // === INIT-BLOCK ===
+  setupDashboardPanels();
+  setupPanelNavigation();
   setupLocation();
   updateSolarLunarBox();
   setupAuroraOvalSlider();
@@ -1975,7 +2025,6 @@ document.addEventListener("DOMContentLoaded", async function() {
   setupMagnetometerGlobal();
   setupMagnetometerGlobalEvents();
   updateAuroraForecasts();
-  setupDashboardPanels();
   rebindSolarPanelEvents();
 	setupAllSky();
 	initReplayOverlay();
@@ -2153,135 +2202,6 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-
-  // === PANEL-STYRNING / LEFTBAR LOGIK ===
-const btns = document.querySelectorAll('.leftbar-btn');
-const panels = document.querySelectorAll('.tab-panel');
-const dashboard = document.getElementById('dashboard-multipanel');
-const panelsWrapper = document.querySelector('.tab-panels-wrapper');
-
-// SMALT LÄGE: Som innan, paneler växlar
-function setActiveTabPanel(section) {
-  dashboard.classList.remove('active');
-  if (panelsWrapper) panelsWrapper.style.display = '';
-  panels.forEach(panel => panel.classList.toggle('active', panel.dataset.section === section));
-  btns.forEach(btn => btn.classList.toggle('active', btn.dataset.section === section));
-  if (section === "cloudmap") openCloudmapIframe();
-  if (section === "lightpollution") openLightPollutionIframe();
-  if (section === "solar" && typeof window.showSolarImagesInline === "function") {
-    window.showSolarImagesInline();
-  }
-  if (section === "objects-in-sky") drawAzimuthMap('astro-azimuth-embed');
-  if (section === "objects-in-sky-graph") drawAstroMasterGraph('astro-master-graph-embed');
-}
-
-// BRETT LÄGE: Dashboardkolumner visas/uppdateras separat beroende på knapp
-function setActiveDashboard(section) {
-  if (!dashboard) return;
-
-  dashboard.classList.add('active');
-  if (panelsWrapper) panelsWrapper.style.display = 'none';
-  panels.forEach(panel => panel.classList.remove('active'));
-  btns.forEach(btn => btn.classList.toggle('active', btn.dataset.section === section));
-
-  // Visa/dölj dashboard-kolumner
-  const allCols = Array.from(dashboard.children);
-
-  // "location" = multiview, visa alla kolumner och ladda alla moduler
-  if (section === "location") {
-    allCols.forEach(col => col.style.display = "flex");
-    rebindSolarPanelEvents();
-  }
-  // Solarwind
-  else if (section === "solarwind") {
-    allCols.forEach(col => col.style.display = col.id === "dashboard-solarwind" ? "flex" : "none");
-    if (typeof window.setupSolarwind === "function") window.setupSolarwind();
-  }
-  // Magnetometer
-  else if (section === "magnetometer") {
-    allCols.forEach(col => col.style.display = col.id === "dashboard-magnetometer" ? "flex" : "none");
-    if (typeof window.setupMagnetometer === "function") window.setupMagnetometer();
-    if (typeof window.setupMagnetometerUIT === "function") window.setupMagnetometerUIT();
-    if (typeof window.setupMagnetometerFMI === "function") window.setupMagnetometerFMI();
-    if (typeof window.setupMagnetometerGlobal === "function") window.setupMagnetometerGlobal();
-  }
-  // Solar (coronabilder)
-  else if (section === "solar") {
-    allCols.forEach(col => col.style.display = col.id === "dashboard-solar" ? "flex" : "none");
-    if (typeof window.showSolarImagesInline === "function") window.showSolarImagesInline();
-  }
-  else if (section === "cloudmap") {
-  dashboard.classList.remove('active');
-  if (panelsWrapper) panelsWrapper.style.display = '';
-  panels.forEach(panel => panel.classList.toggle('active', panel.dataset.section === section));
-  openCloudmapIframe(); // <-- Lägg till denna rad!
-  }
-  else if (section === "lightpollution") {
-  dashboard.classList.remove('active');
-  if (panelsWrapper) panelsWrapper.style.display = '';
-  panels.forEach(panel => panel.classList.toggle('active', panel.dataset.section === section));
-  openLightPollutionIframe(); // <-- Lägg till denna rad!
-  }
-  else if (section === "objects-in-sky") {
-  dashboard.classList.remove('active');
-  if (panelsWrapper) panelsWrapper.style.display = '';
-  panels.forEach(panel => panel.classList.toggle('active', panel.dataset.section === section));
-  drawAzimuthMap('astro-azimuth-embed');
-  }
-  else if (section === "objects-in-sky-graph") {
-  dashboard.classList.remove('active');
-  if (panelsWrapper) panelsWrapper.style.display = '';
-  panels.forEach(panel => panel.classList.toggle('active', panel.dataset.section === section));
-  drawAstroMasterGraph('astro-master-graph-embed');
-  }
-  // Specialpaneler/overlays (molnkarta osv)
-  else {
-    dashboard.classList.remove('active');
-    if (panelsWrapper) panelsWrapper.style.display = '';
-    panels.forEach(panel => panel.classList.toggle('active', panel.dataset.section === section));
-  }
-}
-
-// Automatiskt välja rätt styrfunktion beroende på skärmbredd
-function setActive(section) {
-  const isDesktop = window.innerWidth >= 1350;
-  if (isDesktop) {
-    setActiveDashboard(section);
-  } else {
-    setActiveTabPanel(section);
-  }
-}
-
-// Eventhandlers
-btns.forEach(btn => btn.addEventListener('click', () => setActive(btn.dataset.section)));
-
-// Init: välj location
-setActive('location');
-
-// Vid resize: håll kvar sektion men byt logik beroende på läge
-window.addEventListener('resize', () => {
-  const activeBtn = document.querySelector('.leftbar-btn.active');
-  const section = activeBtn?.dataset.section || "location";
-  setActive(section);
-});
-
-
-btns.forEach(btn => btn.addEventListener('click', () => setActive(btn.dataset.section)));
-setActive('location');
-
-window.addEventListener('resize', () => {
-  // Kolla vilken sektion som är aktiv
-  const activeBtn = document.querySelector('.leftbar-btn.active');
-  const section = activeBtn?.dataset.section || "location";
-  setActive(section);
-
-  // Om dashboard ska vara synlig: uppdatera dess innehåll och events
-  if (window.innerWidth >= 1350 && section === "location") {
-    setupDashboardPanels();
-    rebindSolarPanelEvents();
-  }
-});
-
 document.querySelectorAll('.topbar-link').forEach(link => {
   link.addEventListener('click', async function (e) {
 	if (this.id === 'noaa-forecast-discussion-link') return;
@@ -2388,7 +2308,6 @@ if (btn) {
   setInterval(() => updateAuroraForecasts(), 300000);
   setInterval(() => setupMagnetometer(), 300000);
   setInterval(() => setupMagnetometerFMI(), 300000);
-  setInterval(() => setupMagnetometerGlobal(), 300000);
   setInterval(() => fetchKpAndHp30(), 300000);
   setInterval(() => loadSolarEvents(), 300000);
 });

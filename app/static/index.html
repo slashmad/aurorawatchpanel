@@ -282,7 +282,7 @@
 <section class="tab-panel" data-section="objects-in-sky">
   <div class="azimuth-map-container" id="astro-azimuth-embed">
     <div class="astro-azimuth-controls"></div>
-    <div id="astro-azimuth-map"></div>
+    <div id="astro-azimuth-embed-map" class="astro-azimuth-map"></div>
     <div class="astro-azimuth-times"></div>
   </div>
 </section>
@@ -479,7 +479,7 @@
     <i class="fa-solid fa-sun"></i>Solar & Corona-images
   </div>
   <div class="solar-timelapse-select-row">
-    <select id="timelapse-type" class="solar-timelapse-select">
+    <select id="solar-panel-timelapse-type" class="solar-timelapse-select">
 				<option value="SDO_193_">SDO/AIA 193</option>
 				<option value="SDO_211_">SDO/AIA 211</option>
 				<option value="SDO_171_">SDO/AIA 171</option>
@@ -487,7 +487,7 @@
 				<option value="SDO_131_">SDO/AIA 131</option>
 				<option value="SDO_HMIIF_">SDO/AIA HMIIF</option>
     </select>
-    <input type="date" id="timelapse-date" class="solar-timelapse-date" />
+    <input type="date" id="solar-panel-timelapse-date" class="solar-timelapse-date" />
     <button id="timelapse-show-btn" class="solar-timelapse-show">
       <i class="fa-solid fa-play"></i>
     </button>
@@ -649,8 +649,8 @@
 <!-- ---- SUVI Timelapse Overlay ---- -->
 <div id="timelapse-overlay" class="img-overlay">
 	<div class="timelapse-toolbar">
-		<input id="timelapse-date" type="date" style="width:130px;">
-		<select id="timelapse-type">
+		<input id="timelapse-overlay-date" type="date" style="width:130px;">
+		<select id="timelapse-overlay-type">
 			<option value="SDO_193_">SDO/AIA 193</option>
 			<option value="SDO_211_">SDO/AIA 211</option>
 			<option value="SDO_171_">SDO/AIA 171</option>
@@ -658,11 +658,11 @@
 			<option value="SDO_131_">SDO/AIA 131</option>
 			<option value="SDO_HMIIF_">SDO/AIA HMIIF</option>
 		</select>
-		<button id="timelapse-show">Show</button>
+		<button id="timelapse-overlay-show">Show</button>
 		<button id="timelapse-play-continuous"><i class="fa fa-forward"></i> Play from this date</button>
-		<button id="timelapse-close" title="Close"><i class="fa fa-xmark"></i></button>
+		<button id="timelapse-overlay-close" title="Close"><i class="fa fa-xmark"></i></button>
 	</div>
-	<div id="timelapse-video-container">
+	<div id="timelapse-overlay-video-container">
 	<!-- Input from js here -->
 	</div>
 </div>
@@ -704,8 +704,8 @@
 	<div class="solar-overlay-content">
 		<button id="solar-overlay-close" title="Close"><i class="fa fa-xmark"></i></button>
 		<div class="timelapse-toolbar">
-			<input id="timelapse-date" type="date" style="width:130px;">
-			<select id="timelapse-type">
+			<input id="solar-overlay-timelapse-date" type="date" style="width:130px;">
+			<select id="solar-overlay-timelapse-type">
 				<option value="SDO_193_">SDO/AIA 193</option>
 				<option value="SDO_211_">SDO/AIA 211</option>
 				<option value="SDO_171_">SDO/AIA 171</option>
@@ -713,10 +713,10 @@
 				<option value="SDO_131_">SDO/AIA 131</option>
 				<option value="SDO_HMIIF_">SDO/AIA HMIIF</option>
 			</select>
-			<button id="timelapse-show">Show</button>
-			<button id="timelapse-close" title="Close"><i class="fa fa-xmark"></i></button>
+			<button id="solar-overlay-timelapse-show">Show</button>
+			<button id="solar-overlay-timelapse-close" title="Close"><i class="fa fa-xmark"></i></button>
 		</div>
-		<div id="timelapse-video-container">
+		<div id="solar-overlay-timelapse-video-container">
 		<!-- Input from js here -->
 		</div>
 		<div id="solar-image-grid" class="solar-image-grid"></div>
@@ -732,9 +732,9 @@
 <div id="astro-azimuth-modal" class="astro-overlay-modal">
 	<div class="astro-overlay-content">
 		<button class="astro-overlay-close" data-modal="astro-azimuth-modal"><i class="fa fa-xmark"></i></button>
-		<div class="azimuth-map-container">
+		<div class="azimuth-map-container" id="astro-azimuth-modal-container">
 			<div class="astro-azimuth-controls"></div>
-			<div id="astro-azimuth-map" style="height:100%;width:100%;border-radius:6px;overflow:hidden;"></div>
+			<div id="astro-azimuth-modal-container-map" class="astro-azimuth-map" style="height:100%;width:100%;border-radius:6px;overflow:hidden;"></div>
 			<div class="astro-azimuth-times"></div>
 		</div>
 	</div>

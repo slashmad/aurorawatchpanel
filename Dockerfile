@@ -25,7 +25,7 @@ RUN python -m pip install --upgrade pip && \
     python -m pip install --no-cache-dir -r requirements.lock.txt && \
     python -m pip check
 
-RUN npm install -g esbuild
+RUN npm install -g esbuild@0.28.1
 
 EXPOSE 32231
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "32231"]

@@ -3,22 +3,26 @@ from __future__ import annotations
 import threading
 import time
 import os
+import heapq
 import requests
 import pytz
 import pymysql
 import numpy as np
 import re
 from fastapi import FastAPI, Request, Query
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, FileResponse, Response, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from html import escape
+from typing import Annotated
 from utils import DB, fetch_text, get_db
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from timezonefinder import TimezoneFinder
 from moon_parallax import get_parallactic_angle
+from skyfield_astro import get_sun_moon_info
 from routes_solar import router as solar_router
 from routes_skyfield import router as astro_router
 from routes_weather import weather_router
@@ -52,6 +56,10 @@ SVG_DIR = DATA_DIR / "svg"
 ALLSKY_FS_ROOT = Path(os.getenv("ALLSKY_FS_ROOT", "/allsky-images")).resolve()
 LYCKEBO_FS_ROOT = DATA_IMAGE_DIR / "lyckebocam"
 
+DEFAULT_IMAGE_LIST_LIMIT = 240
+MAX_IMAGE_LIST_LIMIT = 1000
+MAX_HP30_HOURS = 24 * 30
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/data", StaticFiles(directory=str(DATA_DIR)), name="data")
 app.mount("/svg", StaticFiles(directory=str(SVG_DIR)), name="svg")
@@ -80,7 +88,10 @@ async def index(request: Request):
     )
 
 @app.get("/images/list")
-async def images_list(label: str):
+def images_list(
+    label: str,
+    limit: int | None = Query(default=None, ge=1, le=MAX_IMAGE_LIST_LIMIT),
+):
     key_map = {
         "SDO/AIA 131": ("SDO_131", ".jpg"),
         "SDO/AIA 171": ("SDO_171", ".jpg"),
@@ -91,11 +102,31 @@ async def images_list(label: str):
         "Synoptic Map": ("Synoptic", ".jpg"),
     }
     if label not in key_map:
-        return {"files": []}
+        return {"files": [], "limit": limit, "has_more": False}
     key, ext = key_map[label]
     category_dir = DATA_IMAGE_DIR / key
-    files = sorted(category_dir.glob(f"{key}_*{ext}"), reverse=True)
-    return {"files": [f"{key}/{f.name}" for f in files]}
+    effective_limit = limit
+    if effective_limit is None and label != "Synoptic Map":
+        effective_limit = DEFAULT_IMAGE_LIST_LIMIT
+
+    candidates = category_dir.glob(f"{key}_*{ext}")
+    if effective_limit is None:
+        files = sorted(candidates, key=lambda path: path.name, reverse=True)
+        has_more = False
+    else:
+        files = heapq.nlargest(
+            effective_limit + 1,
+            candidates,
+            key=lambda path: path.name,
+        )
+        has_more = len(files) > effective_limit
+        files = files[:effective_limit]
+
+    return {
+        "files": [f"{key}/{path.name}" for path in files],
+        "limit": effective_limit,
+        "has_more": has_more,
+    }
 
 @app.get("/images/{category}/{filename}")
 def get_image(category: str, filename: str):
@@ -299,7 +330,7 @@ def _allsky_kiruna_thumbs(base: str, ymd: str):
 
 
 @app.get("/api/allsky/latest")
-async def allsky_latest(cam: str = "ytterboda", date: str | None = None):
+def allsky_latest(cam: str = "ytterboda", date: str | None = None):
     """
     cam: ytterboda | tavelsjo | kiruna
     date:
@@ -364,7 +395,7 @@ async def allsky_latest(cam: str = "ytterboda", date: str | None = None):
 
 
 @app.get("/api/allsky/thumbnails")
-async def allsky_thumbnails(cam: str = "ytterboda", date: str | None = None):
+def allsky_thumbnails(cam: str = "ytterboda", date: str | None = None):
     """
     Returns thumbnails for the selected cam + date.
     """
@@ -373,7 +404,7 @@ async def allsky_thumbnails(cam: str = "ytterboda", date: str | None = None):
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
-    latest = await allsky_latest(cam=cam, date=date)
+    latest = allsky_latest(cam=cam, date=date)
     if not latest or latest.get("error"):
         return latest
 
@@ -428,7 +459,7 @@ async def allsky_thumbnails(cam: str = "ytterboda", date: str | None = None):
 
 
 @app.get("/allsky/browser", response_class=HTMLResponse)
-async def allsky_browser(p: str = ""):
+def allsky_browser(p: str = ""):
     # Sanitize path (no absolute, no traversal)
     rel = (p or "").lstrip("/")
     parts = Path(rel).parts
@@ -503,7 +534,7 @@ async def allsky_browser(p: str = ""):
     return HTMLResponse(html)
 
 @app.get("/lyckebo/browser", response_class=HTMLResponse)
-async def lyckebo_browser(p: str = ""):
+def lyckebo_browser(p: str = ""):
     # Sanitize path (no absolute, no traversal)
     rel = (p or "").lstrip("/")
     parts = Path(rel).parts
@@ -630,8 +661,140 @@ def _dt_from_allsky_name(filename: str) -> datetime | None:
         return None
 
 
+def _load_replay_database(start_utc, end_utc, station_list, component):
+    col_map = {"x": "kirx", "y": "kiry", "z": "kirz"}
+    mag_col = col_map[component]
+    start_naive = start_utc.replace(tzinfo=None)
+    end_naive = end_utc.replace(tzinfo=None)
+    db = get_db()
+    try:
+        solarwind = []
+        with db.cursor() as cur:
+            cur.execute(
+                """
+                SELECT timestamp, speed, density, bt, bz, `by`
+                FROM solarwind
+                WHERE timestamp >= %s AND timestamp < %s
+                ORDER BY timestamp ASC
+                """,
+                (start_naive, end_naive),
+            )
+            for r in cur.fetchall():
+                ts = r.get("timestamp")
+                if not ts:
+                    continue
+                ts = ts.replace(tzinfo=timezone.utc)
+                solarwind.append({
+                    "time": _iso_z(ts),
+                    "speed": r.get("speed"),
+                    "density": r.get("density"),
+                    "bt": r.get("bt"),
+                    "bz": r.get("bz"),
+                    "by": r.get("by"),
+                })
+
+        # Magnetometer: unify IRF + FMI + GLOBAL + UIT with same response shape.
+        uit_col_map = {"x": "D_deg", "y": "H_nT", "z": "Z_nT"}
+        mag_sources = [
+            {"table": "magnetometer", "station_col": "station", "value_col": mag_col},
+            {"table": "magnetometer_fmi", "station_col": "station", "value_col": component},
+            {"table": "magnetometer_global", "station_col": "station", "value_col": component},
+            {
+                "table": "magnetometer_uit_gif",
+                "station_col": "station",
+                "value_col": uit_col_map.get(component, "D_deg"),
+            },
+        ]
+
+        def _fetch_mag_series(cur, station: str):
+            for src in mag_sources:
+                table = src["table"]
+                st_col = src["station_col"]
+                v_col = src["value_col"]
+                v_col_sql = f"`{v_col}`"
+                cur.execute(
+                    f"""
+                    SELECT timestamp, {v_col_sql} AS v
+                    FROM {table}
+                    WHERE {st_col} = %s AND timestamp >= %s AND timestamp < %s
+                    ORDER BY timestamp ASC
+                    """,
+                    (station, start_naive, end_naive),
+                )
+                rows = cur.fetchall()
+                vals = [rr["v"] for rr in rows if rr.get("v") is not None]
+                if not vals:
+                    continue
+                base = sum(vals) / len(vals)
+                out = []
+                for rr in rows:
+                    if rr.get("v") is None or rr.get("timestamp") is None:
+                        continue
+                    ts = rr["timestamp"].replace(tzinfo=timezone.utc)
+                    out.append({
+                        "time": _iso_z(ts),
+                        "value": round(rr["v"] - base, 2),
+                    })
+                return out
+            return []
+
+        magnetometer = {}
+        with db.cursor() as cur:
+            for st in station_list:
+                magnetometer[st] = _fetch_mag_series(cur, st)
+
+        kp = []
+        with db.cursor() as cur:
+            cur.execute(
+                """
+                SELECT timestamp, kp
+                FROM kp_index
+                WHERE timestamp >= %s AND timestamp < %s
+                ORDER BY timestamp ASC
+                """,
+                (start_naive, end_naive),
+            )
+            for r in cur.fetchall():
+                ts = r.get("timestamp")
+                if ts is None or r.get("kp") is None:
+                    continue
+                kp.append({
+                    "time": _iso_z(ts.replace(tzinfo=timezone.utc)),
+                    "kp": r.get("kp"),
+                })
+
+        hp = []
+        with db.cursor() as cur:
+            cur.execute(
+                """
+                SELECT timestamp, hp30, ap30, hp60, ap60
+                FROM hp_index
+                WHERE timestamp >= %s AND timestamp < %s
+                ORDER BY timestamp ASC
+                """,
+                (start_naive, end_naive),
+            )
+            for r in cur.fetchall():
+                ts = r.get("timestamp")
+                if ts is None:
+                    continue
+                if all(r.get(k) is None for k in ("hp30", "hp60", "ap30", "ap60")):
+                    continue
+                hp.append({
+                    "time": _iso_z(ts.replace(tzinfo=timezone.utc)),
+                    "hp30": r.get("hp30"),
+                    "ap30": r.get("ap30"),
+                    "hp60": r.get("hp60"),
+                    "ap60": r.get("ap60"),
+                })
+
+        return solarwind, magnetometer, kp, hp
+    finally:
+        db.close()
+
+
 @app.get("/api/replay/day")
-async def replay_day(
+def replay_day(
     date: str = Query(..., description="YYYY-MM-DD or DD/MM/YYYY"),
     stations: str = Query("KIR", description="Comma-separated station codes"),
     component: str = Query("x", description="x|y|z for magnetometer"),
@@ -645,8 +808,6 @@ async def replay_day(
     component = (component or "x").lower()
     if component not in ("x", "y", "z"):
         component = "x"
-    col_map = {"x": "kirx", "y": "kiry", "z": "kirz"}
-    mag_col = col_map[component]
 
     station_list = [s.strip().upper() for s in (stations or "").split(",") if s.strip()]
     if not station_list:
@@ -664,130 +825,12 @@ async def replay_day(
             "TRO", "NOR", "SOR", "AND", "RST", "JCK", "DON", "RVK", "DOB", "SOL", "HAR", "KAR", "NAL", "LYR", "HOP", "BJN",
         ]
 
-    # --- DB: solarwind + magnetometer (assumes timestamps stored as UTC naive in DB)
-    db = get_db()
-    start_naive = start_utc.replace(tzinfo=None)
-    end_naive = end_utc.replace(tzinfo=None)
-
-    solarwind = []
-    with db.cursor() as cur:
-        cur.execute(
-            """
-            SELECT timestamp, speed, density, bt, bz, `by`
-            FROM solarwind
-            WHERE timestamp >= %s AND timestamp < %s
-            ORDER BY timestamp ASC
-            """,
-            (start_naive, end_naive),
-        )
-        for r in cur.fetchall():
-            ts = r.get("timestamp")
-            if not ts:
-                continue
-            ts = ts.replace(tzinfo=timezone.utc)
-            solarwind.append({
-                "time": _iso_z(ts),
-                "speed": r.get("speed"),
-                "density": r.get("density"),
-                "bt": r.get("bt"),
-                "bz": r.get("bz"),
-                "by": r.get("by"),
-            })
-
-    # Magnetometer: unify IRF + FMI + GLOBAL + UIT with same response shape.
-    uit_col_map = {"x": "D_deg", "y": "H_nT", "z": "Z_nT"}
-
-    mag_sources = [
-        # IRF table uses kirx/kiry/kirz
-        {"table": "magnetometer", "station_col": "station", "value_col": mag_col},
-        # FMI table uses x/y/z
-        {"table": "magnetometer_fmi", "station_col": "station", "value_col": component},
-        # GLOBAL table uses x/y/z
-        {"table": "magnetometer_global", "station_col": "station", "value_col": component},
-        # UIT table uses D_deg/H_nT/Z_nT
-        {"table": "magnetometer_uit_gif", "station_col": "station", "value_col": uit_col_map.get(component, "D_deg")},
-    ]
-
-    def _fetch_mag_series(cur, station: str):
-        for src in mag_sources:
-            table = src["table"]
-            st_col = src["station_col"]
-            v_col = src["value_col"]
-            # Use backticks for safety (x/y/z, mixed-case, etc.)
-            v_col_sql = f"`{v_col}`"
-            cur.execute(
-                f"""
-                SELECT timestamp, {v_col_sql} AS v
-                FROM {table}
-                WHERE {st_col} = %s AND timestamp >= %s AND timestamp < %s
-                ORDER BY timestamp ASC
-                """,
-                (station, start_naive, end_naive),
-            )
-            rows = cur.fetchall()
-            vals = [rr["v"] for rr in rows if rr.get("v") is not None]
-            if not vals:
-                continue
-            base = sum(vals) / len(vals)
-            out = []
-            for rr in rows:
-                if rr.get("v") is None or rr.get("timestamp") is None:
-                    continue
-                ts = rr["timestamp"].replace(tzinfo=timezone.utc)
-                out.append({"time": _iso_z(ts), "value": round(rr["v"] - base, 2)})
-            return out
-        return []
-
-    magnetometer = {}
-    with db.cursor() as cur:
-        for st in station_list:
-            magnetometer[st] = _fetch_mag_series(cur, st)
-
-    # Kp index (timeline for the day)
-    kp = []
-    with db.cursor() as cur:
-        cur.execute(
-            """
-            SELECT timestamp, kp
-            FROM kp_index
-            WHERE timestamp >= %s AND timestamp < %s
-            ORDER BY timestamp ASC
-            """,
-            (start_naive, end_naive),
-        )
-        for r in cur.fetchall():
-            ts = r.get("timestamp")
-            if ts is None or r.get("kp") is None:
-                continue
-            kp.append({"time": _iso_z(ts.replace(tzinfo=timezone.utc)), "kp": r.get("kp")})
-
-    # HP index (hp30/hp60 + ap30/ap60)
-    hp = []
-    with db.cursor() as cur:
-        cur.execute(
-            """
-            SELECT timestamp, hp30, ap30, hp60, ap60
-            FROM hp_index
-            WHERE timestamp >= %s AND timestamp < %s
-            ORDER BY timestamp ASC
-            """,
-            (start_naive, end_naive),
-        )
-        for r in cur.fetchall():
-            ts = r.get("timestamp")
-            if ts is None:
-                continue
-            if all(r.get(k) is None for k in ("hp30", "hp60", "ap30", "ap60")):
-                continue
-            hp.append({
-                "time": _iso_z(ts.replace(tzinfo=timezone.utc)),
-                "hp30": r.get("hp30"),
-                "ap30": r.get("ap30"),
-                "hp60": r.get("hp60"),
-                "ap60": r.get("ap60"),
-            })
-
-    db.close()
+    solarwind, magnetometer, kp, hp = _load_replay_database(
+        start_utc,
+        end_utc,
+        station_list,
+        component,
+    )
 
     # --- SDO 193: from coronal-holes thumbs (small JPGs)
     sdo_items = []
@@ -838,7 +881,7 @@ async def replay_day(
 
 
 @app.get("/noaa_anim/list/{product}")
-async def list_noaa_images(product: str):
+def list_noaa_images(product: str):
     path = Path("/app/data/noaa_anim") / product
     if not path.exists() or not path.is_dir():
         return JSONResponse({"files": []})
@@ -846,7 +889,7 @@ async def list_noaa_images(product: str):
     return JSONResponse({"files": files})
 
 @app.get("/huxt/list")
-async def list_huxt_files():
+def list_huxt_files():
     path = Path("/app/data/huxt")
     if not path.exists() or not path.is_dir():
         return JSONResponse({"files": []})
@@ -871,18 +914,20 @@ async def moonparallax(
     return {"parallactic_angle": angle}
 
 @app.get("/api/auroraoval")
-async def get_latest_aurora_oval():
+def get_latest_aurora_oval():
     db = get_db()
-    with db.cursor() as cur:
-        cur.execute("SELECT * FROM ovation_aurora ORDER BY id DESC LIMIT 1")
-        row = cur.fetchone()
-    db.close()
+    try:
+        with db.cursor() as cur:
+            cur.execute("SELECT * FROM ovation_aurora ORDER BY id DESC LIMIT 1")
+            row = cur.fetchone()
+    finally:
+        db.close()
     if not row:
         return {"error": "No data"}
     import json
     try:
         row["coordinates"] = json.loads(row.get("probs_json") or "[]")
-    except Exception as e:
+    except Exception:
         return {"error": "Could not decode coordinates"}
     row.pop("probs_json", None)
     row.pop("probs_south_json", None)
@@ -900,72 +945,82 @@ def aurora_oval_list():
     }
 
 @app.get("/hp30/timeseries")
-async def hp30_timeseries(hours: int = 6):
+def hp30_timeseries(
+    hours: Annotated[int, Query(ge=1, le=MAX_HP30_HOURS)] = 6,
+):
     db = get_db()
-    with db.cursor() as cur:
-        cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
-        cur.execute("SELECT timestamp, hp30, ap30, hp60, ap60 FROM hp_index WHERE timestamp >= %s ORDER BY timestamp ASC", (cutoff,))
-        rows = cur.fetchall()
-    db.close()
+    try:
+        with db.cursor() as cur:
+            cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+            cur.execute("SELECT timestamp, hp30, ap30, hp60, ap60 FROM hp_index WHERE timestamp >= %s ORDER BY timestamp ASC", (cutoff,))
+            rows = cur.fetchall()
+    finally:
+        db.close()
     return {"data": [r for r in rows if any(r[k] is not None for k in ["hp30", "hp60"])]}
 
 @app.get("/kp/timeseries")
-async def kp_timeseries(hours: int = 3):
+def kp_timeseries(hours: int = 3):
     db = get_db()
-    with db.cursor() as cur:
-        cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
-        cur.execute("SELECT timestamp, kp FROM kp_index WHERE timestamp >= %s ORDER BY timestamp ASC", (cutoff,))
-        rows = cur.fetchall()
-    db.close()
+    try:
+        with db.cursor() as cur:
+            cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+            cur.execute("SELECT timestamp, kp FROM kp_index WHERE timestamp >= %s ORDER BY timestamp ASC", (cutoff,))
+            rows = cur.fetchall()
+    finally:
+        db.close()
     return {"data": [{"time": r["timestamp"], "kp": r["kp"]} for r in rows if r["kp"] is not None]}
 
 @app.get("/solarwind/timeseries")
-async def solarwind_timeseries(param: str, hours: int = 3):
+def solarwind_timeseries(param: str, hours: int = 3):
     allowed = {"speed", "density", "bt", "bz", "by"}
     if param not in allowed:
         return {"error": "Ogiltig parameter"}
     db = get_db()
-    with db.cursor() as cur:
-        cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
-        cur.execute(f"SELECT timestamp, `{param}` FROM solarwind WHERE timestamp >= %s ORDER BY timestamp ASC", (cutoff,))
-        rows = cur.fetchall()
-    db.close()
+    try:
+        with db.cursor() as cur:
+            cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+            cur.execute(f"SELECT timestamp, `{param}` FROM solarwind WHERE timestamp >= %s ORDER BY timestamp ASC", (cutoff,))
+            rows = cur.fetchall()
+    finally:
+        db.close()
     return {"data": [{"time": r["timestamp"], "value": r[param]} for r in rows if r[param] is not None]}
 
 @app.get("/magneto/timeseries_multi")
-async def magneto_timeseries_multi(
+def magneto_timeseries_multi(
     stations: str,
     hours: int = 3,
     component: str = "x"
 ):
     db = get_db()
-    station_list = [s.strip().upper() for s in stations.split(",") if s.strip()]
-    component = component.lower()
-    if component not in ("x", "y", "z"):
-        component = "x"
-    col_map = {"x": "kirx", "y": "kiry", "z": "kirz"}
-    col = col_map[component]
-    data = {}
-    with db.cursor() as cur:
-        for st in station_list:
-            cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
-            cur.execute(
-                f"SELECT timestamp, {col} FROM magnetometer WHERE station = %s AND timestamp >= %s ORDER BY timestamp ASC",
-                (st, cutoff)
-            )
-            rows = cur.fetchall()
-            values = [r[col] for r in rows if r[col] is not None]
-            if rows and values:
-                base = sum(values) / len(values)
-                data[st] = [
-                    {"time": r["timestamp"], "value": round(r[col] - base, 2)}
-                    for r in rows if r[col] is not None
-                ]
-    db.close()
+    try:
+        station_list = [s.strip().upper() for s in stations.split(",") if s.strip()]
+        component = component.lower()
+        if component not in ("x", "y", "z"):
+            component = "x"
+        col_map = {"x": "kirx", "y": "kiry", "z": "kirz"}
+        col = col_map[component]
+        data = {}
+        with db.cursor() as cur:
+            for st in station_list:
+                cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+                cur.execute(
+                    f"SELECT timestamp, {col} FROM magnetometer WHERE station = %s AND timestamp >= %s ORDER BY timestamp ASC",
+                    (st, cutoff)
+                )
+                rows = cur.fetchall()
+                values = [r[col] for r in rows if r[col] is not None]
+                if rows and values:
+                    base = sum(values) / len(values)
+                    data[st] = [
+                        {"time": r["timestamp"], "value": round(r[col] - base, 2)}
+                        for r in rows if r[col] is not None
+                    ]
+    finally:
+        db.close()
     return {"data": data}
 
 @app.get("/magneto_uit/timeseries")
-async def magneto_uit_timeseries(
+def magneto_uit_timeseries(
     stations: str = "TRO,NOR,SOR,AND,RST,JCK,DON,RVK,DOB,SOL,HAR,KAR,NAL,LYR,HOP,BJN",
     hours: int = 3,
     component: str = "x"
@@ -979,118 +1034,147 @@ async def magneto_uit_timeseries(
     """
 
     db = get_db()
-    station_list = [s.strip().upper() for s in stations.split(",") if s.strip()]
-    component = component.lower()
+    try:
+        station_list = [s.strip().upper() for s in stations.split(",") if s.strip()]
+        component = component.lower()
 
-    # Mappa frontend‐komponenter till kolumnnamn
-    comp_map = {"x": "D_deg", "y": "H_nT", "z": "Z_nT"}
-    col = comp_map.get(component, "D_deg")  # default till D_deg om ogiltig
+        # Mappa frontend‐komponenter till kolumnnamn
+        comp_map = {"x": "D_deg", "y": "H_nT", "z": "Z_nT"}
+        col = comp_map.get(component, "D_deg")  # default till D_deg om ogiltig
 
-    data = {}
-    with db.cursor() as cur:
-        cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
-        for st in station_list:
-            # Läs ut timestamp + vald kolumn
-            cur.execute(
-                f"SELECT timestamp, `{col}` FROM magnetometer_uit_gif "
-                f"WHERE station = %s AND timestamp >= %s ORDER BY timestamp ASC",
-                (st, cutoff)
-            )
-            rows = cur.fetchall()
-            if rows:
-                data[st] = [
-                    {"time": r["timestamp"], "value": round(r[col], 3)}
-                    for r in rows
-                    if r[col] is not None
-                ]
-            else:
-                data[st] = []
-
-    db.close()
+        data = {}
+        with db.cursor() as cur:
+            cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+            for st in station_list:
+                # Läs ut timestamp + vald kolumn
+                cur.execute(
+                    f"SELECT timestamp, `{col}` FROM magnetometer_uit_gif "
+                    f"WHERE station = %s AND timestamp >= %s ORDER BY timestamp ASC",
+                    (st, cutoff)
+                )
+                rows = cur.fetchall()
+                if rows:
+                    data[st] = [
+                        {"time": r["timestamp"], "value": round(r[col], 3)}
+                        for r in rows
+                        if r[col] is not None
+                    ]
+                else:
+                    data[st] = []
+    finally:
+        db.close()
     return {"data": data}
 
 @app.get("/kindex/timeseries")
-async def kindex_timeseries(
+def kindex_timeseries(
     stations: str = "KIR,TOP",
     hours: int = 3
 ):
     db = get_db()
-    station_list = [s.strip().upper() for s in stations.split(",") if s.strip()]
-    data = {}
-    with db.cursor() as cur:
-        for st in station_list:
-            cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
-            cur.execute(
-                "SELECT timestamp, k_index FROM magnetometer_kindex WHERE station = %s AND timestamp >= %s ORDER BY timestamp ASC",
-                (st, cutoff)
-            )
-            rows = cur.fetchall()
-            data[st] = [
-                {"time": r["timestamp"].isoformat() + "Z", "k_index": r["k_index"]}
-                for r in rows if r["k_index"] is not None
-            ]
-    db.close()
+    try:
+        station_list = [s.strip().upper() for s in stations.split(",") if s.strip()]
+        data = {}
+        with db.cursor() as cur:
+            for st in station_list:
+                cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+                cur.execute(
+                    "SELECT timestamp, k_index FROM magnetometer_kindex WHERE station = %s AND timestamp >= %s ORDER BY timestamp ASC",
+                    (st, cutoff)
+                )
+                rows = cur.fetchall()
+                data[st] = [
+                    {"time": r["timestamp"].isoformat() + "Z", "k_index": r["k_index"]}
+                    for r in rows if r["k_index"] is not None
+                ]
+    finally:
+        db.close()
     return {"data": data}
 
 @app.get("/magneto_fmi/timeseries")
-async def magneto_fmi_timeseries(
+def magneto_fmi_timeseries(
     stations: str = "KEV,MAS,KIL,IVA,MUO,SOD,PEL,RAN,OUJ,MEK,HAN,NUR,TAR",
     hours: int = 3,
     component: str = "x"
 ):
     db = get_db()
-    station_list = [s.strip().upper() for s in stations.split(",") if s.strip()]
-    if component.lower() not in ("x", "y", "z"):
-        component = "x"
-    comp = component.lower()
-    data = {}
-    with db.cursor() as cur:
-        for st in station_list:
-            cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
-            cur.execute(
-                f"SELECT timestamp, {comp} FROM magnetometer_fmi WHERE station = %s AND timestamp >= %s ORDER BY timestamp ASC",
-                (st, cutoff)
-            )
-            rows = cur.fetchall()
-            values = [r[comp] for r in rows if r[comp] is not None]
-            if rows and values:
-                base = sum(values) / len(values)
-                data[st] = [
-                    {"time": r["timestamp"], "value": round(r[comp] - base, 2)}
-                    for r in rows if r[comp] is not None
-                ]
-    db.close()
+    try:
+        station_list = [s.strip().upper() for s in stations.split(",") if s.strip()]
+        if component.lower() not in ("x", "y", "z"):
+            component = "x"
+        comp = component.lower()
+        data = {}
+        with db.cursor() as cur:
+            for st in station_list:
+                cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+                cur.execute(
+                    f"SELECT timestamp, {comp} FROM magnetometer_fmi WHERE station = %s AND timestamp >= %s ORDER BY timestamp ASC",
+                    (st, cutoff)
+                )
+                rows = cur.fetchall()
+                values = [r[comp] for r in rows if r[comp] is not None]
+                if rows and values:
+                    base = sum(values) / len(values)
+                    data[st] = [
+                        {"time": r["timestamp"], "value": round(r[comp] - base, 2)}
+                        for r in rows if r[comp] is not None
+                    ]
+    finally:
+        db.close()
     return {"data": data}
 
 @app.get("/magneto_global/timeseries")
-async def magneto_global_timeseries(
+def magneto_global_timeseries(
     stations: str = "BOU,FRD,BRW,CMO",
     hours: int = 3,
     component: str = "x"
 ):
     db = get_db()
-    station_list = [s.strip().upper() for s in stations.split(",") if s.strip()]
-    if component.lower() not in ("x", "y", "z"):
-        component = "x"
-    comp = component.lower()
-    data = {}
-    with db.cursor() as cur:
-        for st in station_list:
-            cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
-            cur.execute(
-                f"SELECT timestamp, {comp} FROM magnetometer_global WHERE station = %s AND timestamp >= %s ORDER BY timestamp ASC",
-                (st, cutoff)
-            )
-            rows = cur.fetchall()
-            values = [r[comp] for r in rows if r[comp] is not None]
-            if rows and values:
-                base = sum(values) / len(values)
-                data[st] = [
-                    {"time": r["timestamp"], "value": round(r[comp] - base, 2)}
-                    for r in rows if r[comp] is not None
-                ]
-    db.close()
+    try:
+        station_list = [s.strip().upper() for s in stations.split(",") if s.strip()]
+        if component.lower() not in ("x", "y", "z"):
+            component = "x"
+        comp = component.lower()
+        data = {}
+        with db.cursor() as cur:
+            for st in station_list:
+                cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+                cur.execute(
+                    f"SELECT timestamp, {comp} FROM magnetometer_global WHERE station = %s AND timestamp >= %s ORDER BY timestamp ASC",
+                    (st, cutoff)
+                )
+                rows = cur.fetchall()
+                values = [r[comp] for r in rows if r[comp] is not None]
+                if rows and values:
+                    base = sum(values) / len(values)
+                    data[st] = [
+                        {"time": r["timestamp"], "value": round(r[comp] - base, 2)}
+                        for r in rows if r[comp] is not None
+                    ]
+    finally:
+        db.close()
     return {"data": data}
+
+def _insert_aurora_flag(payload):
+    db = get_db()
+    try:
+        with db.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS aurora_flags (
+                    timestamp DATETIME PRIMARY KEY,
+                    reason VARCHAR(255),
+                    bz FLOAT, `by` FLOAT,
+                    density FLOAT, speed FLOAT, bt FLOAT,
+                    kirx FLOAT
+                )""")
+            cur.execute("""
+                INSERT IGNORE INTO aurora_flags (timestamp, reason, bz, `by`, density, speed, bt, kirx)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                payload["timestamp"], payload["reason"], payload.get("bz"), payload.get("by"),
+                payload.get("density"), payload.get("speed"), payload.get("bt"), payload.get("kirx")
+            ))
+    finally:
+        db.close()
 
 @app.post("/aurora/flag")
 async def aurora_flag(req: Request):
@@ -1098,37 +1182,22 @@ async def aurora_flag(req: Request):
     required = ["timestamp", "reason"]
     if any(k not in payload for k in required):
         return {"error": "Missing data"}
-    db = get_db()
-    with db.cursor() as cur:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS aurora_flags (
-                timestamp DATETIME PRIMARY KEY,
-                reason VARCHAR(255),
-                bz FLOAT, `by` FLOAT,
-                density FLOAT, speed FLOAT, bt FLOAT,
-                kirx FLOAT
-            )""")
-        cur.execute("""
-            INSERT IGNORE INTO aurora_flags (timestamp, reason, bz, `by`, density, speed, bt, kirx)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """, (
-            payload["timestamp"], payload["reason"], payload.get("bz"), payload.get("by"),
-            payload.get("density"), payload.get("speed"), payload.get("bt"), payload.get("kirx")
-        ))
-    db.close()
+    await run_in_threadpool(_insert_aurora_flag, payload)
     return {"status": "ok"}
 
 @app.get("/aurora/flags")
-async def get_flags():
+def get_flags():
     db = get_db()
-    with db.cursor() as cur:
-        cur.execute("""
-            SELECT timestamp, reason FROM aurora_flags
-            WHERE timestamp >= NOW() - INTERVAL 1 DAY
-            ORDER BY timestamp DESC
-        """)
-        rows = cur.fetchall()
-    db.close()
+    try:
+        with db.cursor() as cur:
+            cur.execute("""
+                SELECT timestamp, reason FROM aurora_flags
+                WHERE timestamp >= NOW() - INTERVAL 1 DAY
+                ORDER BY timestamp DESC
+            """)
+            rows = cur.fetchall()
+    finally:
+        db.close()
     return {"flags": [
         {"time": r["timestamp"].strftime("%Y-%m-%d %H:%M"), "reason": r["reason"]} for r in rows
     ]}
@@ -1159,12 +1228,14 @@ async def aurora_forecast(
         return {"error": str(e)}
 
 @app.get("/ovation/latest_hp")
-async def latest_hemispheric_power():
+def latest_hemispheric_power():
     db = get_db()
-    with db.cursor() as cur:
-        cur.execute("SELECT ts, hemisphere_power_north, hemisphere_power_south FROM ovation_aurora ORDER BY id DESC LIMIT 1")
-        row = cur.fetchone()
-    db.close()
+    try:
+        with db.cursor() as cur:
+            cur.execute("SELECT ts, hemisphere_power_north, hemisphere_power_south FROM ovation_aurora ORDER BY id DESC LIMIT 1")
+            row = cur.fetchone()
+    finally:
+        db.close()
     if not row:
         return {"error": "No HP found"}
     return {
@@ -1181,77 +1252,79 @@ def find_nearest(lst, target, tolerance_s=180):
     return nearest if delta <= tolerance_s else None
 
 @app.get("/byaurora/score_series_synced")
-async def by_aurora_score_series_synced(
+def by_aurora_score_series_synced(
     hours: int = Query(6, ge=1, le=24),
     tolerance: int = Query(120, ge=10, le=600)   # tillåt ±2 min default
 ):
     db = get_db()
-    cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
 
-    # 1. Hämta all magnetometerdata (detrended!)
-    stations = [
-        ("magnetometer", "station", "kirx", "KIR"),
-        ("magnetometer_fmi", "station", "x", "KEV"),
-        ("magnetometer_fmi", "station", "x", "SOD"),
-        ("magnetometer_fmi", "station", "x", "OUJ"),
-        ("magnetometer_fmi", "station", "x", "HAN"),
-        ("magnetometer_fmi", "station", "x", "IVA"),
-        ("magnetometer_fmi", "station", "x", "MEK"),
-        ("magnetometer_fmi", "station", "x", "NUR"),
-        ("magnetometer_fmi", "station", "x", "KIL"),
-        ("magnetometer_fmi", "station", "x", "RAN"),
-        ("magnetometer_global", "station", "x", "BOU"),
-        ("magnetometer_global", "station", "x", "FRD"),
-        ("magnetometer_global", "station", "x", "BRW"),
-        ("magnetometer_global", "station", "x", "CMO"),
-    ]
-
-    station_data = {s[3]: [] for s in stations}
-    with db.cursor() as cur:
-        for table, col_station, col_x, station in stations:
-            cur.execute(
-                f"SELECT timestamp, {col_x} FROM {table} WHERE {col_station}=%s AND timestamp >= %s ORDER BY timestamp ASC",
-                (station, cutoff)
-            )
-            for row in cur.fetchall():
-                if row[col_x] is not None:
-                    station_data[station].append((row["timestamp"], row[col_x]))
-
-    # Detrend
-    station_bases = {}
-    for station, values in station_data.items():
-        vals = [v for t, v in values]
-        station_bases[station] = np.mean(vals) if vals else 0
-
-    # tid (datetime) -> [detrended values]
-    all_times = set()
-    time_to_station_delta = {}
-    for station, values in station_data.items():
-        base = station_bases[station]
-        for t, v in values:
-            all_times.add(t)
-            dval = v - base
-            if t not in time_to_station_delta:
-                time_to_station_delta[t] = []
-            time_to_station_delta[t].append(dval)
-    sorted_times = sorted(all_times)
-
-    # 2. Hämta solvinddata
-    with db.cursor() as cur:
-        cur.execute(
-            "SELECT timestamp, `by`, bz, speed FROM solarwind WHERE timestamp >= %s ORDER BY timestamp ASC",
-            (cutoff,)
-        )
-        sw_rows = [
-            {
-                "timestamp": row["timestamp"] if isinstance(row["timestamp"], datetime) else datetime.strptime(str(row["timestamp"]), "%Y-%m-%d %H:%M:%S"),
-                "by": row["by"],
-                "bz": row["bz"],
-                "speed": row["speed"]
-            }
-            for row in cur.fetchall()
+        # 1. Hämta all magnetometerdata (detrended!)
+        stations = [
+            ("magnetometer", "station", "kirx", "KIR"),
+            ("magnetometer_fmi", "station", "x", "KEV"),
+            ("magnetometer_fmi", "station", "x", "SOD"),
+            ("magnetometer_fmi", "station", "x", "OUJ"),
+            ("magnetometer_fmi", "station", "x", "HAN"),
+            ("magnetometer_fmi", "station", "x", "IVA"),
+            ("magnetometer_fmi", "station", "x", "MEK"),
+            ("magnetometer_fmi", "station", "x", "NUR"),
+            ("magnetometer_fmi", "station", "x", "KIL"),
+            ("magnetometer_fmi", "station", "x", "RAN"),
+            ("magnetometer_global", "station", "x", "BOU"),
+            ("magnetometer_global", "station", "x", "FRD"),
+            ("magnetometer_global", "station", "x", "BRW"),
+            ("magnetometer_global", "station", "x", "CMO"),
         ]
-    db.close()
+
+        station_data = {s[3]: [] for s in stations}
+        with db.cursor() as cur:
+            for table, col_station, col_x, station in stations:
+                cur.execute(
+                    f"SELECT timestamp, {col_x} FROM {table} WHERE {col_station}=%s AND timestamp >= %s ORDER BY timestamp ASC",
+                    (station, cutoff)
+                )
+                for row in cur.fetchall():
+                    if row[col_x] is not None:
+                        station_data[station].append((row["timestamp"], row[col_x]))
+
+        # Detrend
+        station_bases = {}
+        for station, values in station_data.items():
+            vals = [v for t, v in values]
+            station_bases[station] = np.mean(vals) if vals else 0
+
+        # tid (datetime) -> [detrended values]
+        all_times = set()
+        time_to_station_delta = {}
+        for station, values in station_data.items():
+            base = station_bases[station]
+            for t, v in values:
+                all_times.add(t)
+                dval = v - base
+                if t not in time_to_station_delta:
+                    time_to_station_delta[t] = []
+                time_to_station_delta[t].append(dval)
+        sorted_times = sorted(all_times)
+
+        # 2. Hämta solvinddata
+        with db.cursor() as cur:
+            cur.execute(
+                "SELECT timestamp, `by`, bz, speed FROM solarwind WHERE timestamp >= %s ORDER BY timestamp ASC",
+                (cutoff,)
+            )
+            sw_rows = [
+                {
+                    "timestamp": row["timestamp"] if isinstance(row["timestamp"], datetime) else datetime.strptime(str(row["timestamp"]), "%Y-%m-%d %H:%M:%S"),
+                    "by": row["by"],
+                    "bz": row["bz"],
+                    "speed": row["speed"]
+                }
+                for row in cur.fetchall()
+            ]
+    finally:
+        db.close()
     if not sw_rows:
         return {"data": []}
 
