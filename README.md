@@ -187,6 +187,16 @@ When a compatible system Chromium is already installed, the browser test can use
 PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium-browser npm run test:browser
 ```
 
+The magnetometer downsampling runs in SQL. Its integration tests need a disposable MariaDB and are skipped otherwise; the database name must end in `_test`, so they cannot run against a real database by accident:
+
+```bash
+docker run -d --rm --name aurora-test-db -e MARIADB_ROOT_PASSWORD=test -e MARIADB_DATABASE=aurora_test \
+  -e MARIADB_USER=aurora -e MARIADB_PASSWORD=test -p 127.0.0.1:33099:3306 --tmpfs /var/lib/mysql mariadb:11
+AURORA_TEST_DB_HOST=127.0.0.1 AURORA_TEST_DB_PORT=33099 AURORA_TEST_DB_USER=aurora AURORA_TEST_DB_PASS=test \
+  AURORA_TEST_DB_NAME=aurora_test .venv/bin/python -m pytest app/test_magnetometer_sql.py
+docker stop aurora-test-db
+```
+
 The default Ruff gate checks fatal parser and compiler-error classes across the existing application. Broader legacy lint and undefined-name cleanup is intentionally handled as separate, narrowly reviewed work. The similarly named `app/test_coronal_hole_mask.py` is an operational image-analysis script and is deliberately excluded from automatic pytest collection because importing it creates output directories.
 
 The page loads `/static/js/main.min.js`, an esbuild bundle of `app/static/js/main.js` and its imports, and Highcharts from `/static/vendor/highcharts/`. Both are build artifacts and are not committed. Outside Docker, `npm run build` copies the pinned Highcharts files (`npm run vendor`) and builds the bundle with the pinned esbuild version (`npm run test:browser` does this automatically):

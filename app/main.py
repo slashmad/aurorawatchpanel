@@ -986,28 +986,53 @@ def solarwind_timeseries(param: str, hours: int = 3):
         db.close()
     return {"data": [{"time": r["timestamp"], "value": r[param]} for r in rows if r[param] is not None]}
 
-# Magnetometer charts are a few hundred pixels wide; FMI alone delivers ~4,300
-# points per station for 12 h at 10 s resolution. Series are reduced to at most
-# MAGNETOMETER_MAX_POINTS per station, keeping every bucket's minimum and maximum
-# (with their own timestamps) so spikes stay exact, plus the first and the last
-# point (the forecast reads the latest value).
+# Magnetometer charts are a few hundred pixels wide; FMI alone stores ~4,300
+# points per station for 12 h at 10 s resolution. The database reduces each
+# series to at most MAGNETOMETER_MAX_POINTS: every bucket of consecutive rows
+# keeps its minimum and maximum (with their own timestamps) so spikes stay
+# exact, plus the first and the last row (the forecast reads the latest value).
+# The baseline is the mean of all raw values in the window. Doing this in SQL
+# avoids transferring and parsing every raw row (most of the endpoint's time).
 MAGNETOMETER_MAX_POINTS = 600
 
+_RELATIVE_SERIES_SQL = """
+    WITH raw AS (
+        SELECT timestamp, {column} AS v,
+               ROW_NUMBER() OVER (ORDER BY timestamp) AS rn,
+               COUNT(*) OVER () AS n,
+               AVG({column}) OVER () AS base
+        FROM {table}
+        WHERE station = %s AND timestamp >= %s AND {column} IS NOT NULL
+    ), chunked AS (
+        SELECT timestamp, v, rn, n, base,
+               CASE WHEN rn = 1 OR rn = n THEN -1
+                    ELSE FLOOR((rn - 2) / CEIL((n - 2) / %s)) END AS chunk
+        FROM raw
+    ), ranked AS (
+        SELECT timestamp, v, rn, n, base, chunk,
+               ROW_NUMBER() OVER (PARTITION BY chunk ORDER BY v, rn) AS lo,
+               ROW_NUMBER() OVER (PARTITION BY chunk ORDER BY v DESC, rn) AS hi
+        FROM chunked
+    )
+    SELECT timestamp, v, base FROM ranked
+    WHERE n <= %s OR chunk = -1 OR lo = 1 OR hi = 1
+    ORDER BY rn
+"""
 
-def downsample_min_max(points, max_points=MAGNETOMETER_MAX_POINTS, key="value"):
-    if len(points) <= max_points:
-        return points
-    inner = points[1:-1]
+
+def query_relative_series(cur, table, column, station, cutoff, max_points=MAGNETOMETER_MAX_POINTS):
+    """Downsampled series of `column` relative to its window mean (see above).
+
+    `table` and `column` must come from the endpoints' fixed allowlists.
+    Returns [] when the station has no non-null values in the window.
+    """
     buckets = max(1, (max_points - 2) // 2)
-    size = -(-len(inner) // buckets)  # ceil division
-    out = [points[0]]
-    for start in range(0, len(inner), size):
-        chunk = inner[start:start + size]
-        lo = min(range(len(chunk)), key=lambda i: chunk[i][key])
-        hi = max(range(len(chunk)), key=lambda i: chunk[i][key])
-        out.extend(chunk[i] for i in sorted({lo, hi}))
-    out.append(points[-1])
-    return out
+    cur.execute(_RELATIVE_SERIES_SQL.format(table=table, column=column), (station, cutoff, buckets, max_points))
+    rows = cur.fetchall()
+    if not rows:
+        return []
+    base = rows[0]["base"]
+    return [{"time": r["timestamp"], "value": round(r["v"] - base, 2)} for r in rows]
 
 
 @app.get("/magneto/timeseries_multi")
@@ -1028,18 +1053,9 @@ def magneto_timeseries_multi(
         with db.cursor() as cur:
             for st in station_list:
                 cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
-                cur.execute(
-                    f"SELECT timestamp, {col} FROM magnetometer WHERE station = %s AND timestamp >= %s ORDER BY timestamp ASC",
-                    (st, cutoff)
-                )
-                rows = cur.fetchall()
-                values = [r[col] for r in rows if r[col] is not None]
-                if rows and values:
-                    base = sum(values) / len(values)
-                    data[st] = downsample_min_max([
-                        {"time": r["timestamp"], "value": round(r[col] - base, 2)}
-                        for r in rows if r[col] is not None
-                    ])
+                series = query_relative_series(cur, "magnetometer", col, st, cutoff)
+                if series:
+                    data[st] = series
     finally:
         db.close()
     return {"data": data}
@@ -1131,18 +1147,9 @@ def magneto_fmi_timeseries(
         with db.cursor() as cur:
             for st in station_list:
                 cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
-                cur.execute(
-                    f"SELECT timestamp, {comp} FROM magnetometer_fmi WHERE station = %s AND timestamp >= %s ORDER BY timestamp ASC",
-                    (st, cutoff)
-                )
-                rows = cur.fetchall()
-                values = [r[comp] for r in rows if r[comp] is not None]
-                if rows and values:
-                    base = sum(values) / len(values)
-                    data[st] = downsample_min_max([
-                        {"time": r["timestamp"], "value": round(r[comp] - base, 2)}
-                        for r in rows if r[comp] is not None
-                    ])
+                series = query_relative_series(cur, "magnetometer_fmi", comp, st, cutoff)
+                if series:
+                    data[st] = series
     finally:
         db.close()
     return {"data": data}
@@ -1163,18 +1170,9 @@ def magneto_global_timeseries(
         with db.cursor() as cur:
             for st in station_list:
                 cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
-                cur.execute(
-                    f"SELECT timestamp, {comp} FROM magnetometer_global WHERE station = %s AND timestamp >= %s ORDER BY timestamp ASC",
-                    (st, cutoff)
-                )
-                rows = cur.fetchall()
-                values = [r[comp] for r in rows if r[comp] is not None]
-                if rows and values:
-                    base = sum(values) / len(values)
-                    data[st] = downsample_min_max([
-                        {"time": r["timestamp"], "value": round(r[comp] - base, 2)}
-                        for r in rows if r[comp] is not None
-                    ])
+                series = query_relative_series(cur, "magnetometer_global", comp, st, cutoff)
+                if series:
+                    data[st] = series
     finally:
         db.close()
     return {"data": data}

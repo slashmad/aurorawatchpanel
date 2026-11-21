@@ -25,6 +25,22 @@ class FixedDateTime(datetime):
         return cls(2026, 8, 2, 12, 0, 0)
 
 
+def relative_series_query(table, column):
+    return main._RELATIVE_SERIES_SQL.format(table=table, column=column)
+
+
+def relative_series_params(station, cutoff):
+    return (station, cutoff, (main.MAGNETOMETER_MAX_POINTS - 2) // 2, main.MAGNETOMETER_MAX_POINTS)
+
+
+# What the downsampling query returns for raw values 10.0, None, 14.0: the
+# null row is filtered in SQL and `base` is the mean of the non-null values.
+SQL_SERIES_ROWS = [
+    {"timestamp": "2026-08-02T09:30:00", "v": 10.0, "base": 12.0},
+    {"timestamp": "2026-08-02T10:30:00", "v": 14.0, "base": 12.0},
+]
+
+
 class FakeCursor:
     def __init__(self, row=None, rows=None, rows_sequence=None, error=None):
         self.row = row
@@ -338,12 +354,7 @@ class MagnetoTimeseriesMultiEndpointTests(unittest.TestCase):
         self.assertFalse(inspect.iscoroutinefunction(main.magneto_timeseries_multi))
 
     def test_station_parsing_baseline_queries_and_cleanup_are_preserved(self):
-        rows = [
-            {"timestamp": "2026-08-02T09:30:00", "kiry": 10.0},
-            {"timestamp": "2026-08-02T10:00:00", "kiry": None},
-            {"timestamp": "2026-08-02T10:30:00", "kiry": 14.0},
-        ]
-        database = FakeDatabase(rows=rows)
+        database = FakeDatabase(rows=SQL_SERIES_ROWS)
 
         result = self.call_endpoint(
             database,
@@ -361,13 +372,10 @@ class MagnetoTimeseriesMultiEndpointTests(unittest.TestCase):
             "ABC": expected_series,
         }})
         self.assertEqual(database.close_count, 1)
-        query = (
-            "SELECT timestamp, kiry FROM magnetometer WHERE station = %s "
-            "AND timestamp >= %s ORDER BY timestamp ASC"
-        )
+        query = relative_series_query("magnetometer", "kiry")
         self.assertEqual(database.fake_cursor.executed, [
-            (query, ("KIR", "2026-08-02 09:00:00")),
-            (query, ("ABC", "2026-08-02 09:00:00")),
+            (query, relative_series_params("KIR", "2026-08-02 09:00:00")),
+            (query, relative_series_params("ABC", "2026-08-02 09:00:00")),
         ])
 
     def test_component_mapping_and_invalid_fallback_are_preserved(self):
@@ -379,7 +387,7 @@ class MagnetoTimeseriesMultiEndpointTests(unittest.TestCase):
         ):
             with self.subTest(component=component):
                 database = FakeDatabase(rows=[
-                    {"timestamp": "2026-08-02T10:00:00", column: 5.0},
+                    {"timestamp": "2026-08-02T10:00:00", "v": 5.0, "base": 5.0},
                 ])
 
                 result = self.call_endpoint(database, component=component)
@@ -387,9 +395,9 @@ class MagnetoTimeseriesMultiEndpointTests(unittest.TestCase):
                 self.assertEqual(result, {"data": {
                     "KIR": [{"time": "2026-08-02T10:00:00", "value": 0.0}],
                 }})
-                self.assertIn(
-                    f"SELECT timestamp, {column} FROM magnetometer",
+                self.assertEqual(
                     database.fake_cursor.executed[0][0],
+                    relative_series_query("magnetometer", column),
                 )
                 self.assertEqual(database.close_count, 1)
 
@@ -593,12 +601,9 @@ class MagnetoFmiTimeseriesEndpointTests(unittest.TestCase):
         result = self.call_endpoint(database)
 
         self.assertEqual(result, {"data": {}})
-        query = (
-            "SELECT timestamp, x FROM magnetometer_fmi WHERE station = %s "
-            "AND timestamp >= %s ORDER BY timestamp ASC"
-        )
+        query = relative_series_query("magnetometer_fmi", "x")
         self.assertEqual(database.fake_cursor.executed, [
-            (query, (station, "2026-08-02 09:00:00"))
+            (query, relative_series_params(station, "2026-08-02 09:00:00"))
             for station in self.DEFAULT_STATIONS
         ])
         self.assertEqual(database.close_count, 1)
@@ -611,11 +616,7 @@ class MagnetoFmiTimeseriesEndpointTests(unittest.TestCase):
             ("invalid", "x"),
         ):
             with self.subTest(component=component):
-                database = FakeDatabase(rows=[
-                    {"timestamp": "2026-08-02T09:30:00", column: 10.0},
-                    {"timestamp": "2026-08-02T10:00:00", column: None},
-                    {"timestamp": "2026-08-02T10:30:00", column: 14.0},
-                ])
+                database = FakeDatabase(rows=SQL_SERIES_ROWS)
 
                 result = self.call_endpoint(
                     database,
@@ -631,13 +632,10 @@ class MagnetoFmiTimeseriesEndpointTests(unittest.TestCase):
                     "KEV": expected_series,
                     "MAS": expected_series,
                 }})
-                query = (
-                    f"SELECT timestamp, {column} FROM magnetometer_fmi "
-                    "WHERE station = %s AND timestamp >= %s ORDER BY timestamp ASC"
-                )
+                query = relative_series_query("magnetometer_fmi", column)
                 self.assertEqual(database.fake_cursor.executed, [
-                    (query, ("KEV", "2026-08-02 09:00:00")),
-                    (query, ("MAS", "2026-08-02 09:00:00")),
+                    (query, relative_series_params("KEV", "2026-08-02 09:00:00")),
+                    (query, relative_series_params("MAS", "2026-08-02 09:00:00")),
                 ])
                 self.assertEqual(database.close_count, 1)
 
@@ -680,12 +678,9 @@ class MagnetoGlobalTimeseriesEndpointTests(unittest.TestCase):
         result = self.call_endpoint(database)
 
         self.assertEqual(result, {"data": {}})
-        query = (
-            "SELECT timestamp, x FROM magnetometer_global WHERE station = %s "
-            "AND timestamp >= %s ORDER BY timestamp ASC"
-        )
+        query = relative_series_query("magnetometer_global", "x")
         self.assertEqual(database.fake_cursor.executed, [
-            (query, (station, "2026-08-02 09:00:00"))
+            (query, relative_series_params(station, "2026-08-02 09:00:00"))
             for station in self.DEFAULT_STATIONS
         ])
         self.assertEqual(database.close_count, 1)
@@ -698,11 +693,7 @@ class MagnetoGlobalTimeseriesEndpointTests(unittest.TestCase):
             ("invalid", "x"),
         ):
             with self.subTest(component=component):
-                database = FakeDatabase(rows=[
-                    {"timestamp": "2026-08-02T09:30:00", column: 10.0},
-                    {"timestamp": "2026-08-02T10:00:00", column: None},
-                    {"timestamp": "2026-08-02T10:30:00", column: 14.0},
-                ])
+                database = FakeDatabase(rows=SQL_SERIES_ROWS)
 
                 result = self.call_endpoint(
                     database,
@@ -718,13 +709,10 @@ class MagnetoGlobalTimeseriesEndpointTests(unittest.TestCase):
                     "BOU": expected_series,
                     "FRD": expected_series,
                 }})
-                query = (
-                    f"SELECT timestamp, {column} FROM magnetometer_global "
-                    "WHERE station = %s AND timestamp >= %s ORDER BY timestamp ASC"
-                )
+                query = relative_series_query("magnetometer_global", column)
                 self.assertEqual(database.fake_cursor.executed, [
-                    (query, ("BOU", "2026-08-02 09:00:00")),
-                    (query, ("FRD", "2026-08-02 09:00:00")),
+                    (query, relative_series_params("BOU", "2026-08-02 09:00:00")),
+                    (query, relative_series_params("FRD", "2026-08-02 09:00:00")),
                 ])
                 self.assertEqual(database.close_count, 1)
 
@@ -1160,80 +1148,6 @@ class ReplayDayEndpointTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class MagnetometerDownsamplingTests(unittest.TestCase):
-    @staticmethod
-    def series(n):
-        # Deterministic wiggle with one large positive and one large negative spike.
-        points = [{"time": f"t{i:06d}", "value": round(((i * 37) % 101) / 10 - 5, 2)} for i in range(n)]
-        points[n // 3]["value"] = 250.0
-        points[2 * n // 3]["value"] = -310.0
-        return points
-
-    def test_short_series_are_returned_unchanged(self):
-        points = self.series(600)
-        self.assertIs(main.downsample_min_max(points), points)
-
-    def test_long_series_keep_bounds_order_extremes_and_endpoints(self):
-        for n in (601, 4300, 8640, 100_000):
-            with self.subTest(n=n):
-                points = self.series(n)
-                reduced = main.downsample_min_max(points)
-                self.assertLessEqual(len(reduced), main.MAGNETOMETER_MAX_POINTS)
-                self.assertIs(reduced[0], points[0])
-                self.assertIs(reduced[-1], points[-1])
-                self.assertEqual([p["time"] for p in reduced], sorted(p["time"] for p in reduced))
-                self.assertEqual(len({p["time"] for p in reduced}), len(reduced))
-                self.assertIn(250.0, [p["value"] for p in reduced])
-                self.assertIn(-310.0, [p["value"] for p in reduced])
-                originals = {id(p) for p in points}
-                self.assertTrue(all(id(p) in originals for p in reduced))
-
-    def test_every_bucket_extreme_is_kept(self):
-        points = self.series(4300)
-        reduced = main.downsample_min_max(points, max_points=102)  # 50 buckets
-        inner = points[1:-1]
-        size = -(-len(inner) // 50)
-        kept = {p["time"] for p in reduced}
-        for start in range(0, len(inner), size):
-            chunk = inner[start:start + size]
-            self.assertIn(min(chunk, key=lambda p: p["value"])["time"], kept)
-            self.assertIn(max(chunk, key=lambda p: p["value"])["time"], kept)
-
-
-class MagnetometerEndpointDownsamplingTests(unittest.TestCase):
-    def rows(self, n, column):
-        start = datetime(2026, 8, 2, 0, 0, 0)
-        from datetime import timedelta
-        return [{"timestamp": start + timedelta(seconds=10 * i), column: 100.0 + (i % 50)} for i in range(n)]
-
-    def call(self, endpoint, column, n, **kwargs):
-        database = FakeDatabase(rows=self.rows(n, column))
-        with (
-            patch.object(main, "get_db", return_value=database),
-            patch.object(main, "datetime") as datetime_mock,
-        ):
-            datetime_mock.utcnow.return_value = datetime(2026, 8, 2, 12, 0, 0)
-            return endpoint(**kwargs), database
-
-    def test_fmi_global_and_multi_series_are_bounded_with_exact_latest_value(self):
-        cases = (
-            (main.magneto_fmi_timeseries, "x", {"stations": "KEV,SOD", "hours": 12}),
-            (main.magneto_global_timeseries, "x", {"stations": "BOU", "hours": 12}),
-            (main.magneto_timeseries_multi, "kirx", {"stations": "KIR", "hours": 12, "component": "x"}),
-        )
-        for endpoint, column, kwargs in cases:
-            with self.subTest(endpoint=endpoint.__name__):
-                result, database = self.call(endpoint, column, 4300, **kwargs)
-                raw = self.rows(4300, column)
-                base = sum(r[column] for r in raw) / len(raw)
-                for station, series in result["data"].items():
-                    self.assertLessEqual(len(series), main.MAGNETOMETER_MAX_POINTS)
-                    self.assertEqual(series[-1]["time"], raw[-1]["timestamp"])
-                    self.assertEqual(series[-1]["value"], round(raw[-1][column] - base, 2))
-                    self.assertEqual(series[0]["time"], raw[0]["timestamp"])
-                self.assertEqual(database.close_count, 1)
 
 
 class IndexRouteTests(unittest.TestCase):
