@@ -410,3 +410,35 @@ test('Highcharts is self-hosted and pinned, with no request to the Highcharts CD
   await expect(page.locator('.section-error')).toHaveCount(0);
   expect(external.filter(host => host.includes('highcharts'))).toEqual([]);
 });
+
+test('solar images refresh quietly once stale, without the loading placeholder', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-11-21T20:00:00Z') });
+  const lists = [];
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.pathname === '/images/list') lists.push(url.searchParams.get('label'));
+  });
+  await isolateApplicationRequests(page);
+  // Real fixture images from the test server (two SDO thumbnails).
+  await page.route(url => new URL(url).pathname.startsWith('/images/'), route => route.continue());
+  await page.addInitScript(() => {
+    window.Highcharts = { setOptions() {}, chart() { return { destroy() {}, series: [] }; }, charts: [] };
+    window.flatpickr = () => {};
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/?browser_test=1', { waitUntil: 'domcontentloaded' });
+  await expect.poll(() => lists.length).toBe(7);
+  await expect(page.locator('#solar-image-list .solar-image-thumb').first()).toBeVisible();
+  await page.evaluate(() => {
+    window.__placeholderSeen = false;
+    new MutationObserver(() => {
+      if (document.getElementById('solar-image-list').textContent.includes('Loading images')) window.__placeholderSeen = true;
+    }).observe(document.getElementById('solar-image-list'), { childList: true, subtree: true, characterData: true });
+  });
+  lists.length = 0;
+  await page.clock.runFor(10 * 60_000);
+  expect(lists).toEqual([]);
+  await page.clock.runFor(6 * 60_000);
+  await expect.poll(() => lists.length).toBe(7);
+  expect(await page.evaluate(() => window.__placeholderSeen)).toBe(false);
+});

@@ -54,12 +54,26 @@ const LAZY_SECTION_STARTERS = {
     const { setupSolarCycleCharts } = await import('./solar_cycle.js');
     setupSolarCycleCharts();
   },
-  solar: () => {
+  solar: async () => {
     if (isCardActive('solar-images') && typeof window.showSolarImagesInline === "function") {
-      return window.showSolarImagesInline();
+      await window.showSolarImagesInline();
+      solarImagesLoadedAt = Date.now();
     }
   },
 };
+
+// Solar images change slowly; navigation must not reload them (they are
+// already on the desktop dashboard), only refresh them once they are stale.
+const SOLAR_IMAGES_MAX_AGE_MS = 15 * 60 * 1000;
+let solarImagesLoadedAt = 0;
+
+function refreshSolarImagesIfStale() {
+  if (!startedSections.has('solar')) {
+    startVisibleCardGroups();
+    return;
+  }
+  if (Date.now() - solarImagesLoadedAt >= SOLAR_IMAGES_MAX_AGE_MS) runSectionStart('solar');
+}
 const startedSections = new Set();
 const SECTION_ERROR_CODES = {
   solarwind: 'E-SOLARWIND',
@@ -935,7 +949,10 @@ document.addEventListener('keydown', e => {
 window.showSolarImagesInline = async function () {
   const container = document.getElementById('solar-image-list');
   if (!container) return;
-  container.innerHTML = '<div style="font-size:1.2em; color:#88aaff; text-align:center; margin:2em auto;">Loading images...</div>';
+  // First load only: a refresh keeps the current images until the new ones are ready.
+  if (!container.querySelector('.solar-image-thumb')) {
+    container.innerHTML = '<div style="font-size:1.2em; color:#88aaff; text-align:center; margin:2em auto;">Loading images...</div>';
+  }
 
   // Din typ-lista
   const types = [
@@ -1108,7 +1125,8 @@ function openLightPollutionIframe() {
   anchor.innerHTML = '';
   const { lat, lon } = (typeof getLocation === "function" ? getLocation() : { lat: 64.75, lon: 20.95 });
   let iframe = document.createElement('iframe');
-  iframe.src = `https://lightpollutionmap.app/?lat=${lat.toFixed(6)}&lng=${lon.toFixed(6)}&zoom=7`;
+  // The site itself refuses framing (X-Frame-Options); its /embed/ view allows it.
+  iframe.src = `https://lightpollutionmap.app/embed/?lat=${lat.toFixed(6)}&lng=${lon.toFixed(6)}&zoom=7`;
   iframe.width = "100%";
   iframe.height = "100%";
   iframe.style = "border:1px solid #000; border-radius:0.25em; background:#000;";
@@ -1158,7 +1176,7 @@ function setupPanelNavigation() {
     const justStarted = !wasStarted && startedSections.has(section);
     if (section === "cloudmap") openCloudmapIframe();
     if (section === "lightpollution") openLightPollutionIframe();
-    if (section === "solar" && !justStarted) runSectionStart('solar');
+    if (section === "solar" && !justStarted) refreshSolarImagesIfStale();
     if (section === "objects-in-sky") drawAzimuthMap('astro-azimuth-embed');
     if (section === "objects-in-sky-graph") drawAstroMasterGraph('astro-master-graph-embed');
   }
@@ -1191,14 +1209,14 @@ function setupPanelNavigation() {
     });
 
     if (!refresh) return;
+    // Columns that are already loaded are only shown: their own timers keep
+    // them current, so navigation never reloads them.
     if (section === "location") {
       rebindSolarPanelEvents();
-    } else if (section === "solarwind") {
-      runSectionStart('solarwind');
-    } else if (section === "magnetometer") {
-      runSectionStart('magnetometer', magnetometerSteps({ includeUit: true }));
     } else if (section === "solar") {
-      runSectionStart('solar');
+      refreshSolarImagesIfStale();
+    } else {
+      startVisibleCardGroups();
     }
   }
 
@@ -2444,6 +2462,12 @@ if (btn) {
     runSectionStart('magnetometer', magnetometerSteps({ ids: ['mag-irf', 'mag-fmi'] }));
   }, 300000);
   setInterval(() => refreshCardIfActive('kp-gauges'), 300000);
+  // Solar images: refresh quietly once stale while the card is shown and expanded.
+  setInterval(() => {
+    if (startedSections.has('solar') && isCardActive('solar-images') && isDisplayed(cardElement('solar-images'))) {
+      refreshSolarImagesIfStale();
+    }
+  }, 60_000);
 
   // Replaces the former hourly full-page reload; see page_freshness.js.
   setupPageFreshness({ refreshData: refreshLocationData, refreshDaily: refreshDailyCards });

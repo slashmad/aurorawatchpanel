@@ -43,7 +43,7 @@ function panelRefreshRequests(requests) {
   );
 }
 
-test('desktop navigation uses imported refresh owners and resize stays network-silent', async ({ page }) => {
+test('desktop navigation shows loaded columns without reloading them, and resize stays network-silent', async ({ page }) => {
   await page.addInitScript(() => {
     window.Highcharts = {
       setOptions() {},
@@ -73,21 +73,15 @@ test('desktop navigation uses imported refresh owners and resize stays network-s
     typeof window.setupMagnetometerGlobal,
   ])).toEqual(['undefined', 'undefined', 'undefined', 'undefined', 'undefined']);
 
+  // The columns are already on the desktop dashboard and kept fresh by their
+  // own timers, so navigating to them must not reload anything.
   requests.length = 0;
   await page.locator('.leftbar-btn[data-section="solarwind"]').click();
   await expect(page.locator('#dashboard-solarwind')).toBeVisible();
-  await expect.poll(() => panelRefreshRequests(requests)).toHaveLength(5);
-  expect(panelRefreshRequests(requests).every(path => path.startsWith('/solarwind/timeseries?param='))).toBe(true);
-
-  requests.length = 0;
   await page.locator('.leftbar-btn[data-section="magnetometer"]').click();
   await expect(page.locator('#dashboard-magnetometer')).toBeVisible();
-  await expect.poll(() => panelRefreshRequests(requests)).toHaveLength(3);
-  expect(panelRefreshRequests(requests).map(path => path.split('?')[0]).sort()).toEqual([
-    '/magneto/timeseries_multi',
-    '/magneto_fmi/timeseries',
-    '/magneto_global/timeseries',
-  ]);
+  await page.waitForTimeout(300);
+  expect(panelRefreshRequests(requests)).toEqual([]);
 
   requests.length = 0;
   await page.setViewportSize({ width: 1200, height: 900 });
@@ -117,10 +111,12 @@ test('navigation binds before unavailable chart dependencies can abort startup',
   await expect.poll(() => imageListLabels.length).toBe(expectedImageLabels.length);
   expect([...imageListLabels].sort()).toEqual([...expectedImageLabels].sort());
 
+  // Clicking the solar button shows the already loaded images without reloading.
   imageListLabels.length = 0;
   await page.locator('.leftbar-btn[data-section="solar"]').click();
   await expect(page.locator('.leftbar-btn[data-section="solar"]')).toHaveClass(/active/);
   await expect(page.locator('#dashboard-solar')).toBeVisible();
-  await expect.poll(() => imageListLabels.length).toBe(expectedImageLabels.length);
-  expect([...imageListLabels].sort()).toEqual([...expectedImageLabels].sort());
+  await page.waitForTimeout(300);
+  expect(imageListLabels).toEqual([]);
+  await expect(page.locator('#solar-image-list')).not.toContainText('Loading images');
 });

@@ -170,16 +170,16 @@ export async function drawAzimuthMap(containerId = "astro-azimuth-embed") {
     center: [lat, lon],
     zoom: 10,
     zoomControl: false,
-    attributionControl: false,
+    attributionControl: true, // tile providers require visible attribution
     dragging: true,
     scrollWheelZoom: true,
     doubleClickZoom: true
   });
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    subdomains: 'abcd',
-    maxZoom: 19,
+  // CARTO basemaps now require an API key; Esri's dark gray canvas needs none.
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 16,
     minZoom: 3,
-    attribution: '&copy; OpenStreetMap, &copy; CARTO'
+    attribution: 'Tiles &copy; Esri &mdash; Esri, HERE, Garmin, FAO, NOAA, USGS',
   }).addTo(map);
   const state = { map, resizeHandler: null };
   azimuthMapStates.set(container, state);

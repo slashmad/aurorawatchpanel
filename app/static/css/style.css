@@ -2530,3 +2530,11 @@ span:hover > .rt-tooltip {
 .support-liberapay { background: #f6c915; color: #1b1b1b; }
 .support-note { font-size: 0.78rem; color: #8fa1b8; }
 .support-note a { color: #38e1ff; }
+
+/* Leaflet attribution on the dark azimuth map */
+.leaflet-container .leaflet-control-attribution {
+  background: rgba(20, 24, 32, 0.7);
+  color: #8fa1b8;
+  font-size: 0.6rem;
+}
+.leaflet-container .leaflet-control-attribution a { color: #9fc7d8; }
