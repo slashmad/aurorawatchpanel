@@ -26,6 +26,37 @@ import { fetchShared } from './shared_fetch.js';
 const desktopLayoutQuery = window.matchMedia('(min-width: 1350px)');
 const isDesktopLayout = () => desktopLayoutQuery.matches;
 
+// Sections whose data and charts load only once they are shown. On desktop the
+// solarwind and magnetometer columns are visible from the start; on narrow
+// screens they are tabs, and the NOAA solar-cycle tab is hidden everywhere.
+const LAZY_SECTION_STARTERS = {
+  solarwind: () => setupSolarwind(),
+  magnetometer: () => {
+    setupMagnetometer();
+    setupMagnetometerFMI();
+    setupMagnetometerGlobal();
+  },
+  noaa: async () => {
+    const { setupSolarCycleCharts } = await import('./solar_cycle.js');
+    setupSolarCycleCharts();
+  },
+};
+const startedSections = new Set();
+
+function ensureSectionStarted(section) {
+  const start = LAZY_SECTION_STARTERS[section];
+  if (!start || startedSections.has(section)) return false;
+  startedSections.add(section);
+  start();
+  return true;
+}
+
+function startVisibleDashboardSections() {
+  if (!isDesktopLayout()) return;
+  ensureSectionStarted('solarwind');
+  ensureSectionStarted('magnetometer');
+}
+
 window.updateSunspotCard = updateSunspotCard;
 window.lightPollutionLoaded = false;
 window.windyLoaded = false;
@@ -1047,6 +1078,7 @@ function setupPanelNavigation() {
   }
 
   function refreshStandalonePanel(section) {
+    ensureSectionStarted(section);
     if (section === "cloudmap") openCloudmapIframe();
     if (section === "lightpollution") openLightPollutionIframe();
     if (section === "solar" && typeof window.showSolarImagesInline === "function") {
@@ -1116,6 +1148,7 @@ function setupPanelNavigation() {
     const activeBtn = document.querySelector('.leftbar-btn.active');
     const section = activeBtn?.dataset.section || "location";
     setupDashboardPanels();
+    startVisibleDashboardSections();
     setActive(section, { refresh: false });
   });
 }
@@ -2041,12 +2074,10 @@ document.addEventListener("DOMContentLoaded", async function() {
   fetchKpAndHp30();
   loadSolarEvents();
   setupOverlayClassic();
-  setupSolarwind();
-  setupMagnetometer();
-  setupMagnetometerFMI();
   setupMagnetometerFMIEvents();
-  setupMagnetometerGlobal();
   setupMagnetometerGlobalEvents();
+  // Hidden sections start when first shown; see LAZY_SECTION_STARTERS.
+  startVisibleDashboardSections();
   updateAuroraForecasts();
   rebindSolarPanelEvents();
 	setupAllSky();
@@ -2105,9 +2136,6 @@ document.addEventListener("DOMContentLoaded", async function() {
     });
   });
 
-  // Solar cycle charts (importeras asynkront)
-  const { setupSolarCycleCharts } = await import('./solar_cycle.js');
-  setupSolarCycleCharts();
 
   // === MOON IMAGE OVERLAY (bara om elementet finns) ===
   const img = document.getElementById('moon-icon');
@@ -2329,8 +2357,8 @@ if (btn) {
 
   // === PERIODISKA UPPDATERINGAR ===
   setInterval(() => updateAuroraForecasts(), 300000);
-  setInterval(() => setupMagnetometer(), 300000);
-  setInterval(() => setupMagnetometerFMI(), 300000);
+  setInterval(() => { if (startedSections.has('magnetometer')) setupMagnetometer(); }, 300000);
+  setInterval(() => { if (startedSections.has('magnetometer')) setupMagnetometerFMI(); }, 300000);
   setInterval(() => fetchKpAndHp30(), 300000);
   setInterval(() => loadSolarEvents(), 300000);
 

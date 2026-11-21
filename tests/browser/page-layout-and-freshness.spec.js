@@ -260,3 +260,67 @@ test('shared fetch coalesces identical requests and isolates callers', async ({ 
     afterBurst: 1, isolated: true, differentQuery: 2, afterExpiry: 3, firstError: 'SyntaxError', retriedOk: true, total: 5,
   });
 });
+
+async function startDashboard(page, width) {
+  await page.addInitScript(() => {
+    window.Highcharts = { setOptions() {}, chart() { return { destroy() {}, series: [] }; }, charts: [] };
+    window.flatpickr = () => {};
+  });
+  const requests = [];
+  page.on('request', request => {
+    const url = new URL(request.url());
+    requests.push(url.origin === localOrigin ? url.pathname : url.host + url.pathname);
+  });
+  await isolateApplicationRequests(page);
+  await page.setViewportSize({ width, height: 900 });
+  await page.goto('/?browser_test=1', { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
+  return requests;
+}
+
+const SECTION_REQUESTS = {
+  solarwind: path => path.startsWith('/solarwind/timeseries'),
+  magnetometer: path => ['/magneto/timeseries_multi', '/magneto_fmi/timeseries', '/magneto_global/timeseries'].includes(path),
+  noaa: path => path.startsWith('services.swpc.noaa.gov/json/solar-cycle/'),
+};
+const forecastSolarwind = 5; // aurora_forecast always reads 12 h solar wind for the location panel
+const forecastMagnetometer = 2; // ... and the latest KIR + FMI values
+
+test('narrow screens load hidden sections only when their tab is opened', async ({ page }) => {
+  const requests = await startDashboard(page, 412);
+  expect(requests.filter(SECTION_REQUESTS.solarwind)).toHaveLength(forecastSolarwind);
+  expect(requests.filter(SECTION_REQUESTS.magnetometer)).toHaveLength(forecastMagnetometer);
+  expect(requests.filter(SECTION_REQUESTS.noaa)).toHaveLength(0);
+
+  for (const [section, expected] of [['solarwind', 5], ['magnetometer', 3], ['noaa', 2]]) {
+    requests.length = 0;
+    await page.locator(`.leftbar-btn[data-section="${section}"]`).click();
+    await expect.poll(() => requests.filter(SECTION_REQUESTS[section]).length).toBe(expected);
+  }
+
+  // Returning to a started tab does not start it again.
+  await page.locator('.leftbar-btn[data-section="location"]').click();
+  requests.length = 0;
+  await page.locator('.leftbar-btn[data-section="noaa"]').click();
+  await page.waitForTimeout(200);
+  expect(requests.filter(SECTION_REQUESTS.noaa)).toHaveLength(0);
+});
+
+test('desktop starts visible columns immediately but defers the NOAA tab', async ({ page }) => {
+  const requests = await startDashboard(page, 1440);
+  expect(requests.filter(SECTION_REQUESTS.solarwind)).toHaveLength(forecastSolarwind + 5);
+  expect(requests.filter(SECTION_REQUESTS.magnetometer)).toHaveLength(forecastMagnetometer + 3);
+  expect(requests.filter(SECTION_REQUESTS.noaa)).toHaveLength(0);
+
+  requests.length = 0;
+  await page.locator('.leftbar-btn[data-section="noaa"]').click();
+  await expect.poll(() => requests.filter(SECTION_REQUESTS.noaa).length).toBe(2);
+});
+
+test('growing a narrow window to desktop starts the dashboard columns', async ({ page }) => {
+  const requests = await startDashboard(page, 900);
+  requests.length = 0;
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect.poll(() => requests.filter(SECTION_REQUESTS.solarwind).length).toBe(5);
+  await expect.poll(() => requests.filter(SECTION_REQUESTS.magnetometer).length).toBe(3);
+});
