@@ -2389,3 +2389,24 @@ span:hover > .rt-tooltip {
   line-height: 1.3;
   word-break: break-word;
 }
+
+/* Solar & Corona-images: two fixed image columns and a card that hugs its
+   content; on desktop the solar column takes only that width and the other
+   three columns share the rest. */
+#solar-image-card {
+  width: fit-content;
+  max-width: 100%;
+}
+#solar-image-list {
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  justify-content: start;
+}
+#solar-image-list > :not(.solar-image-thumb) {
+  grid-column: 1 / -1;
+}
+@media (min-width: 1350px) {
+  .dashboard-multipanel.active {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  }
+}
