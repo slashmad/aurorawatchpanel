@@ -324,3 +324,63 @@ test('growing a narrow window to desktop starts the dashboard columns', async ({
   await expect.poll(() => requests.filter(SECTION_REQUESTS.solarwind).length).toBe(5);
   await expect.poll(() => requests.filter(SECTION_REQUESTS.magnetometer).length).toBe(3);
 });
+
+test('narrow screens load solar image lists only when the solar tab opens, once', async ({ page }) => {
+  const lists = [];
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.pathname === '/images/list') lists.push(url.searchParams.get('label'));
+  });
+  await startDashboard(page, 412);
+  expect(lists).toEqual([]);
+  await page.locator('.leftbar-btn[data-section="solar"]').click();
+  await expect.poll(() => lists.length).toBe(7);
+  await page.waitForTimeout(300);
+  expect(new Set(lists).size).toBe(7);
+  expect(lists).toHaveLength(7);
+});
+
+test('a missing chart library shows error codes in chart sections and the rest still loads', async ({ page }) => {
+  // No Highcharts stub: the CDN is unreachable, as when browsing via a bare IP.
+  const requests = [];
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.origin === localOrigin) requests.push(url.pathname);
+  });
+  await isolateApplicationRequests(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/?browser_test=1', { waitUntil: 'domcontentloaded' });
+
+  for (const code of ['E-SOLARWIND', 'E-MAGNETOMETER', 'E-KP']) {
+    await expect(page.locator(`.section-error[data-code="${code}"]`)).toHaveCount(1);
+    await expect(page.locator(`.section-error[data-code="${code}"]`)).toContainText('Highcharts');
+  }
+  await expect(page.locator('#dashboard-solarwind > .section-error')).toHaveCount(1);
+  await expect(page.locator('#double-gauge-card > .section-error')).toHaveCount(1);
+  // Sections that do not need charts started normally.
+  await expect.poll(() => requests.filter(p => p === '/images/list').length).toBe(7);
+  await expect.poll(() => requests.includes('/api/allsky/latest')).toBe(true);
+  await expect.poll(() => requests.includes('/api/coronal_holes')).toBe(true);
+  await expect(page.locator('.section-error[data-code="E-SOLAR"]')).toHaveCount(0);
+});
+
+test('section errors are shown per code and cleared on the next success', async ({ page }) => {
+  await page.goto('/static/js/state.js', { waitUntil: 'domcontentloaded' });
+  const result = await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="card"><p>content</p></div>';
+    const { runSection } = await import('/static/js/section_errors.js');
+    await runSection('E-ONE', '#card', () => { throw new Error('boom <b>'); });
+    await runSection('E-TWO', '#card', async () => { throw new Error('later'); });
+    const afterFailures = [...document.querySelectorAll('#card > .section-error')].map(e => e.textContent);
+    const htmlSafe = document.querySelector('#card b') === null;
+    const value = await runSection('E-ONE', '#card', () => 42);
+    const afterSuccess = [...document.querySelectorAll('#card > .section-error')].map(e => e.dataset.code);
+    return { afterFailures, htmlSafe, value, afterSuccess };
+  });
+  expect(result).toEqual({
+    afterFailures: ['⚠ E-TWO: later', '⚠ E-ONE: boom <b>'],
+    htmlSafe: true,
+    value: 42,
+    afterSuccess: ['E-TWO'],
+  });
+});

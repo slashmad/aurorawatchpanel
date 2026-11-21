@@ -112,7 +112,12 @@ test('navigation binds before unavailable chart dependencies can abort startup',
   await page.goto('/?browser_test=1', { waitUntil: 'domcontentloaded' });
 
   await expect(page.locator('.leftbar-btn[data-section="location"]')).toHaveClass(/active/);
-  expect(imageListLabels).toEqual([]);
+  // The solar column is visible on desktop, so it loads at startup even though
+  // the chart library failed and other sections could not start.
+  await expect.poll(() => imageListLabels.length).toBe(expectedImageLabels.length);
+  expect([...imageListLabels].sort()).toEqual([...expectedImageLabels].sort());
+
+  imageListLabels.length = 0;
   await page.locator('.leftbar-btn[data-section="solar"]').click();
   await expect(page.locator('.leftbar-btn[data-section="solar"]')).toHaveClass(/active/);
   await expect(page.locator('#dashboard-solar')).toBeVisible();

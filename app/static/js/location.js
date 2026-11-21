@@ -2,6 +2,7 @@
 
 import { getLocation, setLocation, fetchAndStoreSunMoon } from './state.js';
 import { showWeather } from './weather.js';
+import { runSection } from './section_errors.js';
 
 let debounceTimeout = null;
 function debounce(fn, delay) {
@@ -93,7 +94,7 @@ if (detectBtn) {
 
       // Hämta ny sol/moon/väderdata
       await fetchAndStoreSunMoon();
-      showWeather();
+      runSection('E-WEATHER', '#weather-card-container', () => showWeather());
       if (window.setAuroraForecastLocation) window.setAuroraForecastLocation(lat, lon);
 
       detectBtn.disabled = false;
@@ -127,7 +128,7 @@ function updateAll(callSetAurora = true, tzOverride = null) {
     </span>`;
 
   fetchAndStoreSunMoon().then(() => {
-    showWeather();
+    runSection('E-WEATHER', '#weather-card-container', () => showWeather());
     if (callSetAurora && window.setAuroraForecastLocation) {
       window.setAuroraForecastLocation(curLat, curLon);
     }

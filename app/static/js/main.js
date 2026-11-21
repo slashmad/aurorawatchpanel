@@ -21,6 +21,7 @@ import { updateSunspotCard } from './sunspot.js';
 import { syncDashboardPanelOwnership } from './dashboard_panels.js';
 import { setupPageFreshness } from './page_freshness.js';
 import { fetchShared } from './shared_fetch.js';
+import { runSection, settleAll } from './section_errors.js';
 
 // Desktop dashboard layout; must match the 1350px breakpoint in style.css.
 const desktopLayoutQuery = window.matchMedia('(min-width: 1350px)');
@@ -31,30 +32,55 @@ const isDesktopLayout = () => desktopLayoutQuery.matches;
 // screens they are tabs, and the NOAA solar-cycle tab is hidden everywhere.
 const LAZY_SECTION_STARTERS = {
   solarwind: () => setupSolarwind(),
-  magnetometer: () => {
-    setupMagnetometer();
-    setupMagnetometerFMI();
-    setupMagnetometerGlobal();
-  },
+  magnetometer: () => settleAll([
+    ['IRF', setupMagnetometer],
+    ['FMI', setupMagnetometerFMI],
+    ['Global', setupMagnetometerGlobal],
+  ]),
   noaa: async () => {
     const { setupSolarCycleCharts } = await import('./solar_cycle.js');
     setupSolarCycleCharts();
   },
+  solar: () => {
+    if (typeof window.showSolarImagesInline === "function") window.showSolarImagesInline();
+  },
 };
 const startedSections = new Set();
+const SECTION_ERROR_CODES = {
+  solarwind: 'E-SOLARWIND',
+  magnetometer: 'E-MAGNETOMETER',
+  noaa: 'E-NOAA',
+  solar: 'E-SOLAR',
+};
+
+// Element that currently holds a section's cards (dashboard column or tab).
+function sectionTarget(section) {
+  if (section === 'solar') return document.getElementById('solar-image-card');
+  return (isDesktopLayout() && document.getElementById(`dashboard-${section}`))
+    || document.querySelector(`.tab-panel[data-section="${section}"]`);
+}
+
+// Starts or refreshes a section; failures show an error code inside it.
+function runSectionStart(section, start = LAZY_SECTION_STARTERS[section]) {
+  return runSection(SECTION_ERROR_CODES[section], sectionTarget(section), start);
+}
 
 function ensureSectionStarted(section) {
   const start = LAZY_SECTION_STARTERS[section];
   if (!start || startedSections.has(section)) return false;
   startedSections.add(section);
-  start();
+  // One failing section (e.g. Highcharts unavailable) must not abort the others
+  // or the rest of startup; it shows its error code instead.
+  runSectionStart(section);
   return true;
 }
 
 function startVisibleDashboardSections() {
   if (!isDesktopLayout()) return;
+  // All four dashboard columns are visible on desktop, including the solar images.
   ensureSectionStarted('solarwind');
   ensureSectionStarted('magnetometer');
+  ensureSectionStarted('solar');
 }
 
 window.updateSunspotCard = updateSunspotCard;
@@ -1049,9 +1075,7 @@ function rebindSolarPanelEvents() {
   // Selects/date-inputs – uppdatera bilderna vid ändring (dashboard-läge).
   document.querySelectorAll('#solar-panel-timelapse-type, #solar-panel-timelapse-date').forEach(inp => {
     inp.onchange = function () {
-      if (isDesktopLayout() && typeof window.showSolarImagesInline === "function") {
-        window.showSolarImagesInline();
-      }
+      if (isDesktopLayout()) runSectionStart('solar');
     };
   });
 }
@@ -1078,12 +1102,10 @@ function setupPanelNavigation() {
   }
 
   function refreshStandalonePanel(section) {
-    ensureSectionStarted(section);
+    const justStarted = ensureSectionStarted(section);
     if (section === "cloudmap") openCloudmapIframe();
     if (section === "lightpollution") openLightPollutionIframe();
-    if (section === "solar" && typeof window.showSolarImagesInline === "function") {
-      window.showSolarImagesInline();
-    }
+    if (section === "solar" && !justStarted) runSectionStart('solar');
     if (section === "objects-in-sky") drawAzimuthMap('astro-azimuth-embed');
     if (section === "objects-in-sky-graph") drawAstroMasterGraph('astro-master-graph-embed');
   }
@@ -1119,14 +1141,16 @@ function setupPanelNavigation() {
     if (section === "location") {
       rebindSolarPanelEvents();
     } else if (section === "solarwind") {
-      setupSolarwind();
+      runSectionStart('solarwind');
     } else if (section === "magnetometer") {
-      setupMagnetometer();
-      setupMagnetometerUIT();
-      setupMagnetometerFMI();
-      setupMagnetometerGlobal();
-    } else if (section === "solar" && typeof window.showSolarImagesInline === "function") {
-      window.showSolarImagesInline();
+      runSectionStart('magnetometer', () => settleAll([
+        ['IRF', setupMagnetometer],
+        ['UiT', setupMagnetometerUIT],
+        ['FMI', setupMagnetometerFMI],
+        ['Global', setupMagnetometerGlobal],
+      ]));
+    } else if (section === "solar") {
+      runSectionStart('solar');
     }
   }
 
@@ -1155,16 +1179,19 @@ function setupPanelNavigation() {
 
 // Periodic in-place refresh of location-bound data (sun/moon, weather, forecast).
 async function refreshLocationData() {
-  await fetchAndStoreSunMoon();
-  await showWeather();
+  await runSection('E-SUNMOON', '.location-astro-combined', fetchAndStoreSunMoon);
+  await runSection('E-WEATHER', '#weather-card-container', () => showWeather());
   if (typeof window.setAuroraForecastLocation === "function") {
-    await window.setAuroraForecastLocation();
+    await runSection('E-FORECAST', '#aurora-conditions', () => window.setAuroraForecastLocation());
   }
 }
 
 // Day-based cards; run by page_freshness only after local midnight and when idle.
 function refreshDailyCards() {
-  return Promise.all([updateCoronalHoleCard(), updateSunspotCard()]);
+  return Promise.all([
+    runSection('E-CORONAL', '#coronal-hole-card', () => updateCoronalHoleCard()),
+    runSection('E-SUNSPOT', '#sunspot-card', () => updateSunspotCard()),
+  ]);
 }
 
 // ---- AllSky latest image (supports dashboard cloning) ----
@@ -2067,23 +2094,26 @@ document.addEventListener("DOMContentLoaded", async function() {
   // === INIT-BLOCK ===
   setupDashboardPanels();
   setupPanelNavigation();
-  setupLocation();
-  updateSolarLunarBox();
-  setupAuroraOvalSlider();
-  pollAuroraOvalFrames();
-  fetchKpAndHp30();
-  loadSolarEvents();
+  // Each card runs independently and shows an error code if it fails.
+  runSection('E-LOCATION', '.location-astro-combined', setupLocation);
+  runSection('E-SUNMOON', '.location-astro-combined', updateSolarLunarBox);
+  runSection('E-OVAL', '#aurora-oval-card', () => settleAll([
+    ['slider', setupAuroraOvalSlider],
+    ['frames', pollAuroraOvalFrames],
+  ]));
+  runSection('E-KP', '#double-gauge-card', fetchKpAndHp30);
+  runSection('E-EVENTS', '#aurora-conditions', () => loadSolarEvents());
   setupOverlayClassic();
   setupMagnetometerFMIEvents();
   setupMagnetometerGlobalEvents();
   // Hidden sections start when first shown; see LAZY_SECTION_STARTERS.
   startVisibleDashboardSections();
-  updateAuroraForecasts();
+  runSection('E-FORECAST', '#aurora-conditions', updateAuroraForecasts);
   rebindSolarPanelEvents();
-	setupAllSky();
+  runSection('E-ALLSKY', '.allsky-current-card', setupAllSky);
 	initReplayOverlay();
-  updateCoronalHoleCard();
-  updateSunspotCard();
+  runSection('E-CORONAL', '#coronal-hole-card', () => updateCoronalHoleCard());
+  runSection('E-SUNSPOT', '#sunspot-card', () => updateSunspotCard());
   setTimeout(() => setupTooltips(), 250);
 
   // Quicklinks (HUXt / WSA-ENLIL / SDO / etc)
@@ -2356,11 +2386,16 @@ if (btn) {
   // ...lägg till här om du har fler modaler, overlays eller paneler...
 
   // === PERIODISKA UPPDATERINGAR ===
-  setInterval(() => updateAuroraForecasts(), 300000);
-  setInterval(() => { if (startedSections.has('magnetometer')) setupMagnetometer(); }, 300000);
-  setInterval(() => { if (startedSections.has('magnetometer')) setupMagnetometerFMI(); }, 300000);
-  setInterval(() => fetchKpAndHp30(), 300000);
-  setInterval(() => loadSolarEvents(), 300000);
+  setInterval(() => runSection('E-FORECAST', '#aurora-conditions', updateAuroraForecasts), 300000);
+  setInterval(() => {
+    if (!startedSections.has('magnetometer')) return;
+    runSectionStart('magnetometer', () => settleAll([
+      ['IRF', setupMagnetometer],
+      ['FMI', setupMagnetometerFMI],
+    ]));
+  }, 300000);
+  setInterval(() => runSection('E-KP', '#double-gauge-card', fetchKpAndHp30), 300000);
+  setInterval(() => runSection('E-EVENTS', '#aurora-conditions', () => loadSolarEvents()), 300000);
 
   // Replaces the former hourly full-page reload; see page_freshness.js.
   setupPageFreshness({ refreshData: refreshLocationData, refreshDaily: refreshDailyCards });

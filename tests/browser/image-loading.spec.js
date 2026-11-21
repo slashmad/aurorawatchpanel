@@ -11,7 +11,7 @@ const expectedLabels = [
 ];
 const localOrigin = `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? '18081'}`;
 
-test('solar image history is lazy, unique, and overlay loading is demand-driven', async ({ page }) => {
+test('desktop solar image lists load once at startup and overlay loading is demand-driven', async ({ page }) => {
   const imageListRequests = [];
   const fullImageRequests = [];
 
@@ -44,13 +44,12 @@ test('solar image history is lazy, unique, and overlay loading is demand-driven'
     }
   });
 
+  // Desktop (default 1440 px viewport): the solar column is visible next to the
+  // location column, so its image lists load at startup, once per label.
   await page.goto('/?browser_test=1', { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => typeof window.showSolarImagesInline === 'function');
-  await page.waitForTimeout(500);
-  expect(imageListRequests).toEqual([]);
-
-  await page.evaluate(() => window.showSolarImagesInline());
   await expect.poll(() => imageListRequests.length).toBe(expectedLabels.length);
+  await page.waitForTimeout(300);
+  expect(imageListRequests).toHaveLength(expectedLabels.length);
   expect([...imageListRequests].sort()).toEqual([...expectedLabels].sort());
   await expect(page.locator('.solar-image-thumb')).toHaveCount(2);
 

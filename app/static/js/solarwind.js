@@ -1,4 +1,5 @@
 // app/static/js/solarwind.js
+import { settleAll } from './section_errors.js';
 
 import { getLocation } from './state.js';
 
@@ -365,8 +366,10 @@ export async function fetchAndRenderSW(param, unit) {
 	}
 }
 
+// Refreshes all five charts independently; rejects with the combined errors so
+// callers (section_errors.runSection) can show them.
 function refreshAllSolarwindCharts() {
-  swParams.forEach(({ key }) => solarwindRefreshCallbacks.get(key)());
+  return settleAll(swParams.map(({ key }) => [key, () => solarwindRefreshCallbacks.get(key)()]));
 }
 
 export function setupSolarwind() {
@@ -378,10 +381,14 @@ export function setupSolarwind() {
     }
   });
 
-  refreshAllSolarwindCharts();
+  const initial = refreshAllSolarwindCharts();
   if (solarwindRefreshTimer === null) {
-    solarwindRefreshTimer = setInterval(refreshAllSolarwindCharts, 60_000);
+    solarwindRefreshTimer = setInterval(
+      () => refreshAllSolarwindCharts().catch(err => console.error('Solarwind refresh failed:', err)),
+      60_000,
+    );
   }
+  return initial;
 }
 
 let byAuroraChart = null;
