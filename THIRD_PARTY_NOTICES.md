@@ -2,6 +2,8 @@
 
 Aurora Watch Panel integrates external data and includes a small number of third-party visual assets. Their names and marks do not imply endorsement of this project.
 
+The navigation icons (`app/static/nav-icons/`) and the favicon (`app/static/icons/`, `app/static/favicon.ico`) are the project's own artwork and are covered by its license.
+
 ## Meteocons weather icons
 
 Files under `app/data/icons/` originate from [Meteocons](https://github.com/basmilius/weather-icons).
@@ -15,12 +17,6 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-## Phosphor Icons
-
-The navigation icons under `app/data/phosphor-icons/` originate from [Phosphor Icons](https://github.com/phosphor-icons/core) and are distributed under the MIT License. The full license text is in `app/data/phosphor-icons/LICENSE`.
-
-Copyright (c) 2020-2024 Phosphor Icons
 
 ## NASA moon phase images
 

@@ -1,0 +1,74 @@
+[
+  {
+    "id": "location",
+    "section": "location",
+    "name": "Plats & översikt",
+    "en": "Location & overview",
+    "desc": "Plats, väder och norrskensöversikt.",
+    "file": "01-location.svg"
+  },
+  {
+    "id": "cloudmap",
+    "section": "cloudmap",
+    "name": "Molnkarta",
+    "en": "Cloud map",
+    "desc": "Molntäcke över den valda platsen.",
+    "file": "02-cloudmap.svg"
+  },
+  {
+    "id": "light-pollution",
+    "section": "lightpollution",
+    "name": "Ljusföroreningar",
+    "en": "Light pollution",
+    "desc": "Artificiellt ljus och mörka observationsplatser.",
+    "file": "03-light-pollution.svg"
+  },
+  {
+    "id": "sky-direction",
+    "section": "objects-in-sky",
+    "name": "Himmelsriktning",
+    "en": "Sky direction",
+    "desc": "Azimut och riktningar till himmelsobjekt.",
+    "file": "04-sky-direction.svg"
+  },
+  {
+    "id": "sky-altitude",
+    "section": "objects-in-sky-graph",
+    "name": "Höjd över tid",
+    "en": "Altitude over time",
+    "desc": "Himmelsobjektens höjd över horisonten under dygnet.",
+    "file": "05-sky-altitude.svg"
+  },
+  {
+    "id": "solar-wind",
+    "section": "solarwind",
+    "name": "Solvind",
+    "en": "Solar wind",
+    "desc": "Hastighet, densitet och interplanetärt magnetfält.",
+    "file": "06-solar-wind.svg"
+  },
+  {
+    "id": "magnetometer",
+    "section": "magnetometer",
+    "name": "Magnetometrar",
+    "en": "Magnetometers",
+    "desc": "Lokala och globala mätningar av jordens magnetfält.",
+    "file": "07-magnetometer.svg"
+  },
+  {
+    "id": "solar-images",
+    "section": "solar",
+    "name": "Solbilder",
+    "en": "Solar imagery",
+    "desc": "Solskivan, koronan och bildsekvenser.",
+    "file": "08-solar-images.svg"
+  },
+  {
+    "id": "noaa-forecast",
+    "section": "noaa",
+    "name": "NOAA-prognoser",
+    "en": "NOAA forecasts",
+    "desc": "Rymdväderprognoser och analyser från NOAA SWPC.",
+    "file": "09-noaa-forecast.svg"
+  }
+]

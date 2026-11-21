@@ -2486,3 +2486,28 @@ span:hover > .rt-tooltip {
 }
 .leftbar-util-btn:hover,
 .leftbar-util-btn:focus-visible { color: #38e1ff; outline: none; }
+
+/* ---- Navigation icons (static/nav-icons, inline symbols in index.html) ---- */
+.leftbar-btn .aurora-nav-icon {
+  width: 32px;
+  height: 32px;
+  display: block;
+  flex: none;
+  color: #dceaf3;
+  --aurora-icon-accent: #38e1ff;
+}
+
+.leftbar-btn:hover .aurora-nav-icon,
+.leftbar-btn:focus-visible .aurora-nav-icon {
+  color: #ffffff;
+}
+
+.leftbar-btn.active .aurora-nav-icon {
+  color: #082c37;
+  --aurora-icon-accent: currentColor;
+}
+
+/* Optional: add aurora-icons-mono to the nav element for one-colour icons. */
+.aurora-icons-mono .aurora-nav-icon {
+  --aurora-icon-accent: currentColor;
+}
