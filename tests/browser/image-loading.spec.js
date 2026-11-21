@@ -20,7 +20,7 @@ test('desktop solar image lists load once at startup and overlay loading is dema
     const url = new URL(request.url());
     const isLocalAsset = url.origin === localOrigin && (
       url.pathname === '/' ||
-      url.pathname.startsWith('/static/') ||
+      (url.pathname.startsWith('/static/') && !url.pathname.startsWith('/static/vendor/')) || // vendor: Highcharts is stubbed
       url.pathname.startsWith('/images/') ||
       url.pathname.startsWith('/svg/') ||
       url.pathname.startsWith('/data/')

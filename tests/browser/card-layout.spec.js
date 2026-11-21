@@ -26,7 +26,7 @@ async function openDashboard(page, { width = 1440, layout, beforeLoad } = {}) {
   await page.route('**/*', async route => {
     const request = route.request();
     const url = new URL(request.url());
-    const asset = url.origin === localOrigin && (url.pathname === '/' || /^\/(static|svg|data)\//.test(url.pathname));
+    const asset = url.origin === localOrigin && (url.pathname === '/' || /^\/(static|svg|data)\//.test(url.pathname)) && !url.pathname.startsWith('/static/vendor/');
     if (request.resourceType() === 'document' || asset) await route.continue();
     else if (url.origin === localOrigin) await route.fulfill({ json: {} });
     else await route.abort();

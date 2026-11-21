@@ -8,7 +8,7 @@ async function isolateApplicationRequests(page) {
     const url = new URL(request.url());
     const isLocalAsset = url.origin === localOrigin && (
       url.pathname === '/' ||
-      url.pathname.startsWith('/static/') ||
+      (url.pathname.startsWith('/static/') && !url.pathname.startsWith('/static/vendor/')) || // vendor: Highcharts is stubbed
       url.pathname.startsWith('/svg/') ||
       url.pathname.startsWith('/data/')
     );
@@ -384,4 +384,29 @@ test('section errors are shown per code and cleared on the next success', async 
     value: 42,
     afterSuccess: ['E-TWO'],
   });
+});
+
+test('Highcharts is self-hosted and pinned, with no request to the Highcharts CDN', async ({ page }) => {
+  const external = [];
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.origin !== localOrigin) external.push(url.host);
+  });
+  await page.route('**/*', async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const asset = url.origin === localOrigin && (url.pathname === '/' || /^\/(static|svg|data)\//.test(url.pathname));
+    if (request.resourceType() === 'document' || asset) await route.continue();
+    else if (url.pathname === '/auroraoval/list') await route.fulfill({ json: { files: [] } });
+    else if (url.origin === localOrigin) await route.fulfill({ json: {} });
+    else await route.abort();
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/?browser_test=1', { waitUntil: 'domcontentloaded' });
+  await expect.poll(() => page.evaluate(() => window.Highcharts?.version)).toBe('13.1.1');
+  await expect.poll(() => page.evaluate(() => window.Highcharts.charts.filter(Boolean).length)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => typeof window.Highcharts.seriesTypes.solidgauge)).toBe('function');
+  expect(await page.evaluate(() => typeof window.Highcharts.seriesTypes.arearange)).toBe('function');
+  await expect(page.locator('.section-error')).toHaveCount(0);
+  expect(external.filter(host => host.includes('highcharts'))).toEqual([]);
 });

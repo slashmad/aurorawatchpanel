@@ -109,13 +109,19 @@ The SDO collectors can generate very large datasets. Define and monitor a retent
    docker compose up --build -d
    ```
 
-6. Build the frontend bundle. `app/static/js/main.min.js` is generated and not tracked by Git, so this is required after every checkout or frontend change:
+6. Install the self-hosted chart library. Highcharts (version pinned in `package.json`) is served from `app/static/vendor/`, which is not tracked by Git. Run this once after every checkout and after a Highcharts version change; it only needs Docker:
+
+   ```bash
+   docker run --rm -v "$PWD":/w -w /w node:22-alpine sh -c "npm ci --omit=dev && npm run vendor"
+   ```
+
+7. Build the frontend bundle. `app/static/js/main.min.js` is generated and not tracked by Git, so this is required after every checkout or frontend change:
 
    ```bash
    docker exec aurora-watch-backend esbuild static/js/main.js --bundle --format=esm --minify --outfile=static/js/main.min.js
    ```
 
-7. Open `http://localhost:32230/`.
+8. Open `http://localhost:32230/`.
 
 The FastAPI service is exposed on port `32231`; MariaDB is exposed on `3306`. Restrict or remove those host bindings when they should not be reachable outside the Docker host.
 
@@ -183,7 +189,7 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium-browser npm run test:browser
 
 The default Ruff gate checks fatal parser and compiler-error classes across the existing application. Broader legacy lint and undefined-name cleanup is intentionally handled as separate, narrowly reviewed work. The similarly named `app/test_coronal_hole_mask.py` is an operational image-analysis script and is deliberately excluded from automatic pytest collection because importing it creates output directories.
 
-The page loads `/static/js/main.min.js`, an esbuild bundle of `app/static/js/main.js` and its imports. It is a build artifact and is not committed. Outside Docker, build it with the pinned esbuild version (`npm run test:browser` does this automatically):
+The page loads `/static/js/main.min.js`, an esbuild bundle of `app/static/js/main.js` and its imports, and Highcharts from `/static/vendor/highcharts/`. Both are build artifacts and are not committed. Outside Docker, `npm run build` copies the pinned Highcharts files (`npm run vendor`) and builds the bundle with the pinned esbuild version (`npm run test:browser` does this automatically):
 
 ```bash
 npm run build
