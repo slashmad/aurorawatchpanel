@@ -2545,3 +2545,24 @@ span:hover > .rt-tooltip {
   font-size: 0.68rem;
   color: #e0b45a;
 }
+
+/* Aurora alert level (aurora_forecast.js) */
+.aurora-level-badge {
+  display: inline-block;
+  margin-left: 0.35em;
+  padding: 0.12em 0.55em;
+  border-radius: 1em;
+  font-size: 0.72em;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.35);
+}
+.aurora-action {
+  margin: 0.35em 0 0.3em;
+  padding: 0.3em 0.55em;
+  border-left: 3px solid;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.8em;
+  color: #e6eef7;
+}

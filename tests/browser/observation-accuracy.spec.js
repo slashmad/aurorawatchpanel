@@ -208,3 +208,34 @@ test('Replay clears the frame during a gap and restores it on returning', async 
   await page.locator('#replay-slider').fill('1');
   await expect(img).toHaveAttribute('src', '/images/test.jpg');
 });
+
+const disturbedFmi = { SOD: [{ time: stamp(1), value: -83 }], OUJ: [{ time: stamp(2), value: 0 }] };
+
+test('one disturbed FMI station in the dark shows an aurora watch badge, advice and tab title', async ({ page }) => {
+  await open(page, { sun: -20, mag: 0, fmi: disturbedFmi, offline: ['/solarwind/timeseries', '/proxy/weather/forecast'] });
+  const card = page.locator('#cond-alert');
+  await expect(card).toContainText('Aurora watch for this location');
+  await expect(card.locator('.aurora-level-badge')).toHaveText('AURORA WATCH');
+  await expect(card.locator('.aurora-action')).toContainText('Look north');
+  await expect(card).toContainText('Regional aurora watch.');
+  await expect(page).toHaveTitle('● Aurora watch – Aurora Watch Panel');
+});
+
+test('a disturbance with southward Bz under a cloudy forecast is an alert that still says to look', async ({ page }) => {
+  const bz = [{ time: stamp(1), value: -6 }, { time: stamp(0), value: -6 }];
+  await open(page, { sun: -22, mag: 0, fmi: disturbedFmi, bz });
+  const card = page.locator('#cond-alert');
+  await expect(card.locator('.aurora-level-badge')).toHaveText('AURORA ALERT');
+  await expect(card).toContainText('Aurora alert for this location');
+  await expect(card.locator('.aurora-action')).toContainText('breaks can still reveal aurora');
+  await expect(card).toContainText('Solar wind or planetary indices also favor aurora.');
+  await expect(page).toHaveTitle('● Aurora alert – Aurora Watch Panel');
+});
+
+test('no alert badge in civil twilight even with a disturbance', async ({ page }) => {
+  await open(page, { sun: -5, mag: 0, fmi: disturbedFmi, offline: ['/solarwind/timeseries'] });
+  const card = page.locator('#cond-alert');
+  await expect(card).toContainText('Civil twilight');
+  await expect(card.locator('.aurora-level-badge')).toHaveCount(0);
+  await expect(page).toHaveTitle('Aurora Watch Panel');
+});

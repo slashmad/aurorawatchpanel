@@ -14,6 +14,24 @@ const stationFeeds = [
 ];
 const lastStationReports = new Map();
 let forecastVersion = 0;
+const BASE_TITLE = document.title || 'Aurora Watch Panel';
+
+// Alert levels shown as a badge, a headline and in the tab title. They only
+// summarise the signals computed below; the thresholds live there.
+const ALERT_LEVELS = {
+  watch: { badge: 'AURORA WATCH', color: '#f5b83d', text: '#1b1b1b', headline: 'Aurora watch for this location', title: 'Aurora watch' },
+  alert: { badge: 'AURORA ALERT', color: '#3ddc84', text: '#0b2a17', headline: 'Aurora alert for this location', title: 'Aurora alert' },
+  storm: { badge: 'STRONG ACTIVITY', color: '#f23d3d', text: '#fff', headline: 'Strong aurora activity for this location', title: 'Strong aurora activity' },
+};
+
+// What to do now, including the cloud forecast: a cloudy forecast must not
+// hide a real disturbance, because breaks in the cloud still show aurora.
+function actionAdvice(cloudNow) {
+  if (!Number.isFinite(cloudNow)) return '<b>Look north</b> and check the all-sky cameras below.';
+  if (cloudNow >= 70) return '<b>Look north.</b> Clouds are forecast, but breaks can still reveal aurora — check the all-sky cameras below.';
+  if (cloudNow > 20) return '<b>Look north</b> through the gaps in the clouds, and check the all-sky cameras below.';
+  return '<b>Look north</b> — the sky is forecast to be clear.';
+}
 
 function stationDistanceKm(lat, lon, station) {
   const rad = Math.PI / 180;
@@ -401,6 +419,16 @@ if (headsUpBox) headsUpBox.innerHTML = headsUpHtml;
       activity = 'Solar wind or planetary indices indicate elevated activity.';
     }
 
+    const disturbed = stations.filter(s => s.active);
+    const maxDeviation = disturbed.reduce((m, s) => Math.max(m, Math.abs(s.value)), 0);
+    let level = null;
+    if (extremeGlobal) level = 'storm';
+    else if (signal && (strongWind || globalStrongTrigger || disturbed.length >= 2 || maxDeviation >= 100)) level = 'alert';
+    else if (activity) level = 'watch';
+    // Aurora is visible from nautical twilight on; daylight and civil twilight show no badge.
+    const darkEnough = Number.isFinite(sunAltitude) && sunAltitude < -6;
+    const shownLevel = darkEnough ? level : null;
+
     let headline, mainMsg = '', extraTip = '';
     if (!Number.isFinite(sunAltitude)) {
       headline = 'Daylight conditions are unavailable for this location.';
@@ -413,7 +441,7 @@ if (headsUpBox) headsUpBox.innerHTML = headsUpHtml;
       mainMsg = `The Sun is ${Math.abs(sunAltitude).toFixed(1)}° below the horizon. Sky brightness can reduce aurora visibility.`;
       if (activity) extraTip = activity;
     } else {
-      headline = 'Aurora conditions at this location';
+      headline = shownLevel ? ALERT_LEVELS[shownLevel].headline : 'Aurora conditions at this location';
       if (activity) {
         mainMsg = (signal ? '<b>Regional aurora watch.</b> ' : '<b>Aurora possible.</b> ') + activity;
       } else if (!stations.some(s => s.value !== null) || bz === null) {
@@ -437,31 +465,22 @@ if (headsUpBox) headsUpBox.innerHTML = headsUpHtml;
     const feedStatus = offline.length ? ` Latest update unavailable from ${offline.join(', ')}.` : '';
     const nearestInfo = `${networkInfo}Nearest station: <b>${nearest.name}</b> (${Math.round(nearest.km)} km, ${stationStatus}).${feedStatus}`;
 
-    // Storm badge
-    let alertBadge = "";
-    if (extremeGlobal) {
-      alertBadge = `<span style="
-        background:#f23d3d;
-        color:#fff;
-        border-radius:20px;
-        padding:3px 8px 3px 6px;
-        font-size:0.95em;
-        font-weight:bold;
-        box-shadow:0 0 12px #d00b,0 0 3px #fff4;
-        display:inline-flex;
-        align-items:center;
-        z-index:12;
-      ">
-        <svg width="12" height="12" style="margin-right:4px" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="#fff" stroke="#fff" stroke-width="2"/><text x="10" y="15" text-anchor="middle" font-size="13" fill="#f23d3d" font-family="sans-serif" font-weight="bold">!</text></svg>
-        ELEVATED ACTIVITY
-      </span>`;
+    let alertBadge = '';
+    let actionLine = '';
+    if (shownLevel) {
+      const cfg = ALERT_LEVELS[shownLevel];
+      alertBadge = `<span class="aurora-level-badge" data-level="${shownLevel}" style="background:${cfg.color};color:${cfg.text}">${cfg.badge}</span>`;
+      const cloudNow = weather?.cloudArr?.[0];
+      actionLine = `<div class="aurora-action" style="border-color:${cfg.color}">${actionAdvice(cloudNow)}</div>`;
     }
+    document.title = shownLevel ? `● ${ALERT_LEVELS[shownLevel].title} – ${BASE_TITLE}` : BASE_TITLE;
 
     const condAlert = document.getElementById('cond-alert');
     if (condAlert) {
       condAlert.innerHTML =
         `<div style="position:relative">
            <b>${headline}</b> ${alertBadge}<br>
+           ${actionLine}
            <span style="font-size:0.7em">${mainMsg}</span>
            <div style="font-size:0.7em;color:#ccc;margin-top:0.4em">${nearestInfo}</div>
            ${infoParts.length ? "<br><span style='color:#fff7; font-size:0.7em'>" + infoParts.join(" ") + "</span>" : ""}
