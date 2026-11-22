@@ -1,6 +1,6 @@
 [tool.pytest.ini_options]
 testpaths = ["."]
-python_files = ["test_images_list.py", "test_main_database_endpoints.py", "test_fetch_solarwind.py", "test_skyfield_astro.py", "test_magnetometer_sql.py", "test_fetch_magnetometer.py"]
+python_files = ["test_images_list.py", "test_main_database_endpoints.py", "test_fetch_solarwind.py", "test_skyfield_astro.py", "test_magnetometer_sql.py", "test_fetch_magnetometer.py", "test_observation_accuracy.py"]
 asyncio_mode = "strict"
 
 [tool.coverage.run]

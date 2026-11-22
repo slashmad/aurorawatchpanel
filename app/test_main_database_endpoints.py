@@ -870,10 +870,7 @@ class LatestHemisphericPowerEndpointTests(unittest.TestCase):
             "hemispheric_power_north": 42.5,
             "hemispheric_power_south": 18.0,
         })
-        self.assertEqual(database.fake_cursor.executed, [
-            "SELECT ts, hemisphere_power_north, hemisphere_power_south "
-            "FROM ovation_aurora ORDER BY id DESC LIMIT 1"
-        ])
+        self.assertIn("FROM ovation_power ORDER BY ts DESC", database.fake_cursor.executed[0])
         self.assertEqual(database.close_count, 1)
 
     def test_empty_result_preserves_error_and_cleanup(self):

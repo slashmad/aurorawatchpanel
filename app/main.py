@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import time
 import os
-import heapq
+from bisect import bisect_left
 import requests
 import pytz
 import pymysql
@@ -19,7 +19,7 @@ from html import escape
 from typing import Annotated
 from utils import DB, fetch_text, get_db
 from pathlib import Path
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from timezonefinder import TimezoneFinder
 from moon_parallax import get_parallactic_angle
 from skyfield_astro import get_sun_moon_info
@@ -88,46 +88,53 @@ async def index(request: Request):
         },
     )
 
+IMAGE_CATEGORIES = {
+    "SDO/AIA 131": "SDO_131", "SDO/AIA 171": "SDO_171", "SDO/AIA 193": "SDO_193",
+    "SDO/AIA 211": "SDO_211", "SDO/AIA 304": "SDO_304", "SDO/AIA HMIIF": "SDO_HMIIF",
+    "Synoptic Map": "Synoptic",
+}
+_image_indexes = {}
+_image_index_locks = {key: threading.Lock() for key in IMAGE_CATEGORIES.values()}
+
+
+def _image_names(key):
+    """One immutable sorted filename index per product, rebuilt on directory changes."""
+    directory = DATA_IMAGE_DIR / key
+    with _image_index_locks[key]:
+        try:
+            stat = directory.stat()
+            signature = (directory, stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns)
+            previous, names = _image_indexes.get(key, (None, ()))
+            if previous != signature:
+                with os.scandir(directory) as entries:
+                    names = tuple(sorted(e.name for e in entries if e.name.startswith(key + "_")
+                                         and e.name.endswith(".jpg") and e.is_file()))
+                _image_indexes[key] = (signature, names)
+            return names
+        except (FileNotFoundError, NotADirectoryError):
+            _image_indexes.pop(key, None)
+            return ()
+
+
 @app.get("/images/list")
-def images_list(
-    label: str,
-    limit: int | None = Query(default=None, ge=1, le=MAX_IMAGE_LIST_LIMIT),
-):
-    key_map = {
-        "SDO/AIA 131": ("SDO_131", ".jpg"),
-        "SDO/AIA 171": ("SDO_171", ".jpg"),
-        "SDO/AIA 193": ("SDO_193", ".jpg"),
-        "SDO/AIA 211": ("SDO_211", ".jpg"),
-        "SDO/AIA 304": ("SDO_304", ".jpg"),
-        "SDO/AIA HMIIF": ("SDO_HMIIF", ".jpg"),
-        "Synoptic Map": ("Synoptic", ".jpg"),
-    }
-    if label not in key_map:
+def images_list(label: str, limit: Annotated[int | None, Query(ge=1, le=MAX_IMAGE_LIST_LIMIT)] = None,
+                day: date | None = None):
+    key = IMAGE_CATEGORIES.get(label)
+    if key is None:
         return {"files": [], "limit": limit, "has_more": False}
-    key, ext = key_map[label]
-    category_dir = DATA_IMAGE_DIR / key
-    effective_limit = limit
-    if effective_limit is None and label != "Synoptic Map":
-        effective_limit = DEFAULT_IMAGE_LIST_LIMIT
+    if limit is None and label != "Synoptic Map":
+        limit = DEFAULT_IMAGE_LIST_LIMIT
 
-    candidates = category_dir.glob(f"{key}_*{ext}")
-    if effective_limit is None:
-        files = sorted(candidates, key=lambda path: path.name, reverse=True)
-        has_more = False
-    else:
-        files = heapq.nlargest(
-            effective_limit + 1,
-            candidates,
-            key=lambda path: path.name,
-        )
-        has_more = len(files) > effective_limit
-        files = files[:effective_limit]
+    names = _image_names(key)
+    lo, hi = 0, len(names)
+    if day is not None:
+        prefix = f"{key}_{day:%Y%m%d}T"
+        lo = bisect_left(names, prefix)
+        hi = bisect_left(names, prefix[:-1] + "U")
+    start = max(lo, hi - limit) if limit is not None else lo
+    return {"files": [f"{key}/{names[i]}" for i in range(hi - 1, start - 1, -1)],
+            "limit": limit, "has_more": start > lo}
 
-    return {
-        "files": [f"{key}/{path.name}" for path in files],
-        "limit": effective_limit,
-        "has_more": has_more,
-    }
 
 @app.get("/images/{category}/{filename}")
 def get_image(category: str, filename: str):
@@ -656,7 +663,7 @@ def _dt_from_allsky_name(filename: str) -> datetime | None:
     try:
         local_tz = pytz.timezone("Europe/Stockholm")
         naive = datetime.strptime(ts14, "%Y%m%d%H%M%S")
-        local_dt = local_tz.localize(naive)
+        local_dt = local_tz.localize(naive, is_dst=None)
         return local_dt.astimezone(pytz.utc).replace(tzinfo=timezone.utc)
     except Exception:
         return None
@@ -854,19 +861,23 @@ def replay_day(
     # Keep chronological order
     sdo_items.sort(key=lambda x: x["time"])
 
-    # --- AllSky: full frames from local /allsky-images/YYYYMMDD/image-*.jpg
+    # The replay day is UTC. Camera filenames and folders use Swedish local time.
     allsky_items = []
-    day_dir = ALLSKY_FS_ROOT / yyyymmdd
-    if day_dir.exists():
-        for p in sorted(day_dir.glob("image-*.jpg")):
+    camera_tz = pytz.timezone("Europe/Stockholm")
+    day = start_utc.astimezone(camera_tz).date()
+    last_day = (end_utc - timedelta(seconds=1)).astimezone(camera_tz).date()
+    while day <= last_day:
+        folder = day.strftime("%Y%m%d")
+        for p in (ALLSKY_FS_ROOT / folder).glob("image-*.jpg"):
             dt = _dt_from_allsky_name(p.name)
-            if not dt:
-                continue
-            allsky_items.append({
-                "time": _iso_z(dt),
-                "url": f"/allsky-images/{yyyymmdd}/{p.name}",
-                "filename": p.name,
-            })
+            if dt is not None and start_utc <= dt < end_utc:
+                allsky_items.append({
+                    "time": _iso_z(dt),
+                    "url": f"/allsky-images/{folder}/{p.name}",
+                    "filename": p.name,
+                })
+        day += timedelta(days=1)
+    allsky_items.sort(key=lambda item: item["time"])
 
     return {
         "date": date,
@@ -1020,14 +1031,26 @@ _RELATIVE_SERIES_SQL = """
 """
 
 
-def query_relative_series(cur, table, column, station, cutoff, max_points=MAGNETOMETER_MAX_POINTS):
+def query_relative_series(cur, table, column, station, cutoff, max_points=MAGNETOMETER_MAX_POINTS,
+                          *, latest_only=False):
     """Downsampled series of `column` relative to its window mean (see above).
 
     `table` and `column` must come from the endpoints' fixed allowlists.
     Returns [] when the station has no non-null values in the window.
     """
-    buckets = max(1, (max_points - 2) // 2)
-    cur.execute(_RELATIVE_SERIES_SQL.format(table=table, column=column), (station, cutoff, buckets, max_points))
+    if latest_only:
+        # Same baseline and final non-null sample as the chart, without sorting
+        # or transferring the full time series for each station in the forecast.
+        cur.execute(f"""
+            SELECT sample.timestamp, sample.{column} AS v, window_stats.base
+            FROM (SELECT AVG({column}) AS base, MAX(timestamp) AS latest
+                  FROM {table} WHERE station = %s AND timestamp >= %s
+                  AND {column} IS NOT NULL) AS window_stats
+            JOIN {table} AS sample ON sample.station = %s AND sample.timestamp = window_stats.latest
+        """, (station, cutoff, station))
+    else:
+        buckets = max(1, (max_points - 2) // 2)
+        cur.execute(_RELATIVE_SERIES_SQL.format(table=table, column=column), (station, cutoff, buckets, max_points))
     rows = cur.fetchall()
     if not rows:
         return []
@@ -1047,7 +1070,8 @@ def station_last_seen(cur, table, station):
 def magneto_timeseries_multi(
     stations: str,
     hours: int = 3,
-    component: str = "x"
+    component: str = "x",
+    latest_only: bool = False,
 ):
     db = get_db()
     try:
@@ -1062,7 +1086,7 @@ def magneto_timeseries_multi(
         with db.cursor() as cur:
             for st in station_list:
                 cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
-                series = query_relative_series(cur, "magnetometer", col, st, cutoff)
+                series = query_relative_series(cur, "magnetometer", col, st, cutoff, latest_only=latest_only)
                 if series:
                     data[st] = series
                 else:
@@ -1148,7 +1172,8 @@ def kindex_timeseries(
 def magneto_fmi_timeseries(
     stations: str = "KEV,MAS,KIL,IVA,MUO,SOD,PEL,RAN,OUJ,MEK,HAN,NUR,TAR",
     hours: int = 3,
-    component: str = "x"
+    component: str = "x",
+    latest_only: bool = False,
 ):
     db = get_db()
     try:
@@ -1161,7 +1186,7 @@ def magneto_fmi_timeseries(
         with db.cursor() as cur:
             for st in station_list:
                 cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
-                series = query_relative_series(cur, "magnetometer_fmi", comp, st, cutoff)
+                series = query_relative_series(cur, "magnetometer_fmi", comp, st, cutoff, latest_only=latest_only)
                 if series:
                     data[st] = series
                 else:
@@ -1176,7 +1201,8 @@ def magneto_fmi_timeseries(
 def magneto_global_timeseries(
     stations: str = "BOU,FRD,BRW,CMO",
     hours: int = 3,
-    component: str = "x"
+    component: str = "x",
+    latest_only: bool = False,
 ):
     db = get_db()
     try:
@@ -1189,7 +1215,7 @@ def magneto_global_timeseries(
         with db.cursor() as cur:
             for st in station_list:
                 cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
-                series = query_relative_series(cur, "magnetometer_global", comp, st, cutoff)
+                series = query_relative_series(cur, "magnetometer_global", comp, st, cutoff, latest_only=latest_only)
                 if series:
                     data[st] = series
                 else:
@@ -1249,7 +1275,7 @@ def get_flags():
     ]}
 
 @app.get("/aurora/forecast")
-async def aurora_forecast(
+def aurora_forecast(
     lat: float = Query(...),
     lon: float = Query(...),
     tz: str = Query("Europe/Stockholm")
@@ -1261,10 +1287,12 @@ async def aurora_forecast(
         # Gör forecast-logik här (exempel förenklad):
         forecast = {}
         if sunmoon['sunrise'] == "-" and sunmoon['sunset'] == "-":
-            if sunmoon['height'] > 0:
+            if not isinstance(sunmoon.get("sun_altitude"), (int, float)):
+                return {"error": "Solar altitude is unavailable"}
+            if sunmoon["sun_altitude"] > -0.833:
                 forecast['msg'] = "It is midnight sun – aurora will most likely not be visible."
             else:
-                forecast['msg'] = "It is polar night – perfect darkness for aurora!"
+                forecast['msg'] = "The sun stays below the horizon today. Check the solar altitude for twilight."
         else:
             forecast['msg'] = "Standard day/night conditions."
         forecast['sunmoon'] = sunmoon
@@ -1278,14 +1306,25 @@ def latest_hemispheric_power():
     db = get_db()
     try:
         with db.cursor() as cur:
-            cur.execute("SELECT ts, hemisphere_power_north, hemisphere_power_south FROM ovation_aurora ORDER BY id DESC LIMIT 1")
-            row = cur.fetchone()
+            try:
+                cur.execute("SELECT ts, forecast_time, north AS hemisphere_power_north, "
+                            "south AS hemisphere_power_south FROM ovation_power ORDER BY ts DESC LIMIT 1")
+                row = cur.fetchone()
+            except pymysql.ProgrammingError as exc:
+                if exc.args[0] != 1146:  # Collector has not initialized the new table yet.
+                    raise
+                row = None
+            if not row:
+                cur.execute("SELECT ts, hemisphere_power_north, hemisphere_power_south "
+                            "FROM ovation_aurora ORDER BY id DESC LIMIT 1")
+                row = cur.fetchone()
     finally:
         db.close()
     if not row:
         return {"error": "No HP found"}
     return {
         "ts": row["ts"],
+        **({"forecast_time": row["forecast_time"]} if row.get("forecast_time") else {}),
         "hemispheric_power_north": row["hemisphere_power_north"],
         "hemispheric_power_south": row["hemisphere_power_south"]
     }

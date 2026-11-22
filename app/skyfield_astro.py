@@ -52,6 +52,11 @@ def _local_day_times(ts, tz, day, step_minutes):
     local_times = [tz.localize(local_midnight + timedelta(minutes=m)) for m in range(0, 1440, step_minutes)]
     return ts.from_datetimes([lt.astimezone(pytz.utc) for lt in local_times]), local_times
 
+def _local_day_bounds(ts, day, tz):
+    return tuple(ts.from_datetime(tz.localize(datetime.combine(d, time.min)))
+                 for d in (day, day + timedelta(days=1)))
+
+
 def get_object_events(body, ts, eph, topos, observer, now, t0, t1):
     """
     Compute rise, set, max altitude, and current alt/az for a given celestial body.
@@ -87,7 +92,8 @@ def get_object_events(body, ts, eph, topos, observer, now, t0, t1):
 
     # 1) Calculate rise and set using skyfield almanac
     try:
-        f = almanac.risings_and_settings(eph, body, topos)
+        f = (almanac.sunrise_sunset(eph, topos) if body.target == 10
+             else almanac.risings_and_settings(eph, body, topos))
         times, events = almanac.find_discrete(t0, t1, f)
         for t, e in zip(times, events):
             dt_local = t.utc_datetime().replace(tzinfo=pytz.utc).astimezone(now.tzinfo)
@@ -143,7 +149,7 @@ def _compute_sun_info(lat=63.9, lon=20.5, tz_str="Europe/Stockholm", twilight_ty
         lat    : float, latitude in degrees (default 63.9)
         lon    : float, longitude in degrees (default 20.5)
         tz_str : string, timezone identifier (default "Europe/Stockholm")
-        twilight_type : string, either "civil" (0°) or "nautical" (−6°) (default "civil")
+        twilight_type : string, either "civil" (−6°) or "nautical" (−12°) (default "civil")
 
     Returns:
         dict with keys:
@@ -180,8 +186,7 @@ def _compute_sun_info(lat=63.9, lon=20.5, tz_str="Europe/Stockholm", twilight_ty
     now = datetime.now(tz)
     today = now.date()
     # Define start and end of interval in UTC
-    t0 = ts.utc(now.year, now.month, now.day)
-    t1 = ts.utc(now.year, now.month, now.day + 1)
+    t0, t1 = _local_day_bounds(ts, today, tz)
 
     # 4) Get rise/set/max/current for the Sun
     sun_data = get_object_events(
@@ -195,16 +200,20 @@ def _compute_sun_info(lat=63.9, lon=20.5, tz_str="Europe/Stockholm", twilight_ty
         t1=t1
     )
 
-    # 5) Compute dawn, dusk och golden hours
-    #    Välj tröskel för dawn/dusk beroende på twilight_type
-    if twilight_type == "nautical":
-        twilight_threshold = -6.0
-    else:
-        # default "civil"
-        twilight_threshold = 0.0
-
     golden = get_golden_hours(ts, eph, topos, today, tz)
-    dawn_dusk = get_dawn_dusk(ts, eph, topos, today, tz, threshold_degrees=twilight_threshold)
+    twilight = almanac.dark_twilight_day(eph, topos)
+    times, states = almanac.find_discrete(t0, t1, twilight)
+    before = int(twilight(t0))
+    selected = 2 if twilight_type == "nautical" else 3
+    dawn_dusk = dict(dawn=None, dusk=None, astro_dawn=None, astro_dusk=None)
+    for event, after in zip(times, states):
+        local_time = event.astimezone(tz).strftime("%H:%M")
+        for level, prefix in ((selected, ""), (1, "astro_")):
+            if before < level <= after:
+                dawn_dusk[prefix + "dawn"] = local_time
+            elif after < level <= before:
+                dawn_dusk[prefix + "dusk"] = local_time
+        before = int(after)
 
     # 6) Bygg dict med alla värden
     combined = {
@@ -219,8 +228,7 @@ def _compute_sun_info(lat=63.9, lon=20.5, tz_str="Europe/Stockholm", twilight_ty
         "sun_altitude": sun_data["altitude"],
 
         # Dawn/Dusk
-        "dawn": dawn_dusk.get("dawn"),
-        "dusk": dawn_dusk.get("dusk"),
+        **dawn_dusk,
 
         # Typ av twilight för ovan tider
         "twilight_type": twilight_type,
@@ -259,7 +267,7 @@ def _compute_sun_info(lat=63.9, lon=20.5, tz_str="Europe/Stockholm", twilight_ty
 
 def moon_phase_label(illum, is_waxing):
     # illum: 0–100 (procent)
-    if illum < 1 or illum > 99:
+    if illum < 1:
         return "New Moon"
     elif illum < 49:
         return "Waxing Crescent" if is_waxing else "Waning Crescent"
@@ -291,11 +299,11 @@ def _compute_moon_info(lat=63.9, lon=20.5, tz_str="Europe/Stockholm"):
 
     ts, eph = get_timescale_and_ephemeris()
     earth = eph['earth']
-    sun = eph['sun']
     moon = eph['moon']
     topos = Topos(latitude_degrees=lat, longitude_degrees=lon)
-    now = datetime.now(pytz.timezone(tz_str))
-
+    tz = pytz.timezone(tz_str)
+    now = datetime.now(tz)
+    t0, t1 = _local_day_bounds(ts, now.date(), tz)
 
     moon_data = get_object_events(
         body=moon,
@@ -304,8 +312,7 @@ def _compute_moon_info(lat=63.9, lon=20.5, tz_str="Europe/Stockholm"):
         topos=topos,
         observer=earth + topos,
         now=now,
-        t0=ts.utc(now.year, now.month, now.day),
-        t1=ts.utc(now.year, now.month, now.day + 1)
+        t0=t0, t1=t1
     )
     """
     Return only moon-specific data (rise, set, max, current alt/az) plus phase info.
@@ -337,16 +344,9 @@ def _compute_moon_info(lat=63.9, lon=20.5, tz_str="Europe/Stockholm"):
 
     # 5) Calculate moon phase (percentage) and waxing/waning
     t_now = ts.from_datetime(now.astimezone(pytz.utc))
-    sun_vec  = (earth + topos).at(t_now).observe(sun).apparent().position.km
-    moon_vec = (earth + topos).at(t_now).observe(moon).apparent().position.km
-    phase_angle = np.arccos(
-        np.dot(sun_vec, moon_vec) /
-        (np.linalg.norm(sun_vec) * np.linalg.norm(moon_vec))
-    )
-    moon_phase = (1 - np.cos(phase_angle)) / 2  # fraction 0.0–1.0
-
-    illum = int(round(moon_phase * 100))
-    is_waxing = bool(phase_angle < np.pi)
+    phase_degrees = almanac.moon_phase(eph, t_now).degrees
+    illum = int(round(100 * almanac.fraction_illuminated(eph, 'moon', t_now)))
+    is_waxing = bool(phase_degrees < 180)
     moon_phase_label_value = moon_phase_label(illum, is_waxing)
 
     # 6) Next full moon: exact lunar-phase search. The former 6-hourly sampling
@@ -365,9 +365,9 @@ def _compute_moon_info(lat=63.9, lon=20.5, tz_str="Europe/Stockholm"):
         "moon_max_azimuth": moon_data["max_azimuth"],
         "moon_azimuth": moon_data["azimuth"],
         "moon_altitude": moon_data["altitude"],
-        "moon_phase": int(round(moon_phase * 100)),
+        "moon_phase": illum,
         "moon_phase_label": moon_phase_label_value,
-        "moon_phase_index": int(round(moon_phase * 29)),
+        "moon_phase_index": round(((phase_degrees + 180) % 360) * 29 / 360) % 29,
         "next_fullmoon": next_fullmoon,
         "is_waxing": is_waxing,
         "tz": tz_str
@@ -472,38 +472,6 @@ def get_golden_hours(ts, eph, topos, date, tz):
         "golden_hour_evening_start": golden_hour_evening_start,
         "golden_hour_evening_end":   golden_hour_evening_end,
     }
-
-def get_dawn_dusk(ts, eph, topos, date, tz, threshold_degrees=0.0):
-    """
-    Compute dawn and dusk by scanning from 18:00 previous day to 06:00 next day (UTC),
-    filtering to only those times that fall on 'date' (00:00–24:00 local time).
-
-    threshold_degrees : float, om du vill ha civil twilight (0.0) eller nautical (-6.0)
-    """
-    prev_day = date - timedelta(days=1)
-    next_day = date + timedelta(days=1)
-
-    # 1) Bygg tidsintervall i UTC
-    t0_local_prev = tz.localize(datetime.combine(prev_day, time(18, 0)))
-    t0 = ts.from_datetime(t0_local_prev.astimezone(pytz.utc))
-    t1_local_next = tz.localize(datetime.combine(next_day, time(6, 0)))
-    t1 = ts.from_datetime(t1_local_next.astimezone(pytz.utc))
-
-    # 2) Hämta alla crossings för vald tröskel (threshold_degrees)
-    all_crossings = find_altitude_crossings(ts, eph, topos, threshold_degrees, t0, t1)
-
-    # 3) Filtrera dem som ligger på 'date' (00:00–24:00 lokal tid)
-    filtered = [t_tt.astimezone(tz) for t_tt in all_crossings if t_tt.astimezone(tz).date() == date]
-
-    # 4) Bestäm dawn (första) och dusk (sista)
-    if len(filtered) >= 2:
-        dawn = filtered[0].strftime("%H:%M")
-        dusk = filtered[-1].strftime("%H:%M")
-    else:
-        dawn = None
-        dusk = None
-
-    return {"dawn": dawn, "dusk": dusk}
 
 def get_sun_moon_info(lat=63.9, lon=20.5, tz_str="Europe/Stockholm"):
     """

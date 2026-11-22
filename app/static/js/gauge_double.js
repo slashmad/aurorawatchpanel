@@ -71,7 +71,7 @@ function statRow(label, stats, colorFn) {
   <div style="margin-top: -50px; margin-bottom: 5px; display: flex; align-items: flex-start; justify-content: center;">
     <div style="color:${getKpStopColor(kpValue)}; font-size:1em; font-weight:bold; text-shadow:1px 1px 3px #111;">
       <span class="kp-tooltip-wrap" style="position:relative; display:inline-block; cursor:pointer;">
-        KP: ${kpValue.toFixed(1)}
+        KP: ${kpValue?.toFixed(1) ?? '–'}
         <span class="rt-tooltip">Real-time value</span>
       </span>
     </div>
@@ -98,7 +98,7 @@ ${statRow("12h", kp12h, getKpStopColor)}
   <div style="margin-top: -50px; margin-bottom: 5px; margin-left: 10px; display: flex; align-items: flex-start; justify-content: center;">
     <div style="color:${getHp30StopColor(hp30Value)}; font-size:1em; font-weight:bold; text-shadow:1px 1px 3px #111;">
       <span class="hp-tooltip-wrap" style="position:relative; display:inline-block; cursor:pointer;">
-        HP30: ${hp30Value.toFixed(1)}
+        HP30: ${hp30Value?.toFixed(1) ?? '–'}
         <span class="rt-tooltip">Real-time value</span>
       </span>
     </div>
@@ -176,7 +176,7 @@ ${statRow("12h", hp30_12h, getHp30StopColor)}
     ...gaugeOpts,
     series: [{
       name: 'Kp',
-      data: [Math.round(kpValue * 10) / 10],
+      data: [kpValue],
       radius: '100%',
       innerRadius: '60%',
       color: getKpColor(kpValue)
@@ -188,6 +188,7 @@ ${statRow("12h", hp30_12h, getHp30StopColor)}
     ...gaugeOpts,
     yAxis: {
       ...gaugeOpts.yAxis,
+      max: Math.max(9, Math.ceil(hp30Value ?? 0)),
       labels: {
         ...gaugeOpts.yAxis.labels,
         formatter: function () {
@@ -199,7 +200,7 @@ ${statRow("12h", hp30_12h, getHp30StopColor)}
     },
     series: [{
       name: 'Hp30',
-      data: [Math.round(hp30Value * 10) / 10],
+      data: [hp30Value],
       radius: '100%',
       innerRadius: '60%'
     }]

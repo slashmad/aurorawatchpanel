@@ -33,6 +33,7 @@ export const moonPhases = [
 ];
 
 export function getNearestMoonPhase(currentIllum, waxing) {
+  if (currentIllum >= 99.5) return moonPhases[0];
   let best = null, minDiff = Infinity;
   // Waxing = index 14–28, Waning = index 0–14.
   let start = waxing ? 14 : 0;

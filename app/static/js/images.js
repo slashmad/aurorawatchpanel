@@ -1,3 +1,4 @@
+import { openSynopticOverlay } from './synoptic.js';
 // app/static/js/images.js
 
 window.imageData = window.imageData || {};
@@ -21,7 +22,7 @@ export function setupImages() {
   ];
 
   Promise.all(types.map(async ({ label, id }) => {
-    const res = await fetch(`/images/list?label=${encodeURIComponent(label)}&_=${Date.now()}`);
+    const res = await fetch(`/images/list?label=${encodeURIComponent(label)}${label === "Synoptic Map" ? "&limit=1" : ""}&_=${Date.now()}`);
     const files = (await res.json()).files || [];
     if (files.length) {
       imageData[label] = files;
@@ -47,7 +48,7 @@ export function renderThumbnail(label, containerId, retries = 3, delayMs = 2500)
   const container = document.getElementById(containerId);
   if (!container) return;
 
-  const thumb = getThumbFilename(fname);
+  const thumb = label === 'Synoptic Map' ? fname : getThumbFilename(fname);
   const imgUrl = `/images/${thumb}?v=${Date.now()}`;
 
   container.innerHTML = `
@@ -62,7 +63,7 @@ export function renderThumbnail(label, containerId, retries = 3, delayMs = 2500)
         retried++;
         setTimeout(async () => {
           // Hämta ny lista från backend igen (kan nu ha nytt filnamn)
-          const res = await fetch(`/images/list?label=${encodeURIComponent(label)}&_=${Date.now()}`);
+          const res = await fetch(`/images/list?label=${encodeURIComponent(label)}${label === "Synoptic Map" ? "&limit=1" : ""}&_=${Date.now()}`);
           const files = (await res.json()).files || [];
           if (files.length) {
             imageData[label] = files;
@@ -115,6 +116,7 @@ function labelToContainer(label) {
 let sdoPlayInterval = null;
 
 export function showSDOOverlayWithSlider(label) {
+  if (label === "Synoptic Map") return openSynopticOverlay(imageData[label]?.[0]);
   const arr = imageData[label];
 
   overlay = document.getElementById('img-overlay');
@@ -188,6 +190,7 @@ export function showSDOOverlayWithSlider(label) {
   }
 
 export function openOverlayClassic(label) {
+  if (label === "Synoptic Map") return openSynopticOverlay(imageData[label]?.[0]);
   overlay = document.getElementById('img-overlay');
   overlayImg = document.getElementById('img-overlay-img');
   if (!overlay || !overlayImg) return;

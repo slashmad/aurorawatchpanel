@@ -23,6 +23,10 @@ let moonData = null;
  * @param {string} newTz - IANA timezone string (e.g., "Europe/Stockholm")
  */
 export function setLocation(newLat, newLon, newTz, newCountry = null, newPlacename = null) {
+  if (newLat !== lat || newLon !== lon || newTz !== tz) {
+    sunData = null;
+    moonData = null;
+  }
   lat = newLat;
   lon = newLon;
   tz  = newTz;
@@ -66,8 +70,12 @@ export async function fetchAndStoreSunMoon() {
       console.error("Failed to fetch sun or moon:", sunRes.status, moonRes.status);
       return;
     }
-    sunData = await sunRes.json();
-    moonData = await moonRes.json();
+    const [sun, moon] = await Promise.all([sunRes.json(), moonRes.json()]);
+    const current = getLocation();
+    if (lat === current.lat && lon === current.lon && tz === current.tz) {
+      sunData = sun;
+      moonData = moon;
+    }
   } catch (e) {
     console.error("Error in fetchAndStoreSunMoon:", e);
   }
@@ -87,6 +95,8 @@ export function getMoonData() {
  * Clears the saved location and timezone from state and localStorage.
  */
 export function clearLocation() {
+  sunData = null;
+  moonData = null;
   lat = null;
   lon = null;
   tz = null;

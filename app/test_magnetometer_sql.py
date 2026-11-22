@@ -154,11 +154,13 @@ class RelativeSeriesSqlTests(unittest.TestCase):
         ):
             datetime_mock.utcnow.return_value = now
             result = main.magneto_fmi_timeseries(stations="KEV,SOD", hours=12, component="x")
+            latest = main.magneto_fmi_timeseries(stations="KEV,SOD", hours=12, component="x", latest_only=True)
         self.assertEqual(list(result["data"]), ["KEV"])
         self.assertEqual(result["missing"], {"SOD": None})  # never reported
         series = result["data"]["KEV"]
         self.assertLessEqual(len(series), main.MAGNETOMETER_MAX_POINTS)
         self.assertEqual(series[-1]["time"], now)
+        self.assertEqual(latest, {"data": {"KEV": [series[-1]]}, "missing": {"SOD": None}})
 
 
 if __name__ == "__main__":

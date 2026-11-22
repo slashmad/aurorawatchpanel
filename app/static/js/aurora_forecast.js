@@ -1,31 +1,80 @@
-// app/static/js/aurora_forecast.js
-
 import { fetchShared } from './shared_fetch.js';
-import { getLocation, setLocation } from './state.js';
-import { showWeather, showInPlaceTime, getParsedWeatherAndSunMoon } from './weather.js';
-import { fetchAndRenderSW } from './solarwind.js';
-import { fetchAndRenderMagIRF, IRF_STATIONS } from './magnetometer.js';
-import { setupMagnetometerFMI, setupMagnetometerFMIEvents, FMI_STATIONS } from './magnetometer_fmi.js';
-import { setupMagnetometerUIT, setupMagnetometerUITEvents, UIT_STATIONS } from './magnetometer_uit.js';
-import { setupMagnetometerGlobal, GLOBAL_MAG_STATIONS } from './magnetometer_global.js';
-import { setupHp30Gauge } from './hp30.js';
-import { setupKpGauge } from './kpindex.js';
-import { drawAstroMasterGraph } from './skyfield_graph.js';
+import { getLocation } from './state.js';
+import { showInPlaceTime } from './weather.js';
+import { IRF_STATIONS } from './magnetometer.js';
+import { FMI_STATIONS } from './magnetometer_fmi.js';
+import { GLOBAL_MAG_STATIONS } from './magnetometer_global.js';
 
-const ALL_MAG_STATIONS = [
-  ...IRF_STATIONS,
-  ...FMI_STATIONS,
-  ...UIT_STATIONS,
-  ...GLOBAL_MAG_STATIONS
+// These feeds expose the X component in nT relative to its window mean.
+// UiT provides D/H/Z instead, so its angles cannot use the X threshold.
+const stationFeeds = [
+  { name: 'FMI/IMAGE', region: 'Europe', stations: FMI_STATIONS, endpoint: '/magneto_fmi/timeseries' },
+  { name: 'Swedish network', region: 'Europe', stations: IRF_STATIONS, endpoint: '/magneto/timeseries_multi' },
+  { name: 'USGS', region: 'North America', stations: GLOBAL_MAG_STATIONS, endpoint: '/magneto_global/timeseries' },
 ];
+const lastStationReports = new Map();
+let forecastVersion = 0;
 
-function nearestMagnetometerStation(lat, lon) {
-  let best = null, bestDist = Infinity;
-  for (const s of ALL_MAG_STATIONS) {
-    const d = Math.hypot(lat - s.lat, lon - s.lon);
-    if (d < bestDist) { bestDist = d; best = s; }
+function stationDistanceKm(lat, lon, station) {
+  const rad = Math.PI / 180;
+  const a = Math.sin((lat - station.lat) * rad / 2) ** 2
+    + Math.cos(lat * rad) * Math.cos(station.lat * rad) * Math.sin((lon - station.lon) * rad / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(Math.min(1, a)));
+}
+
+async function forecastJson(url) {
+  try {
+    const res = await fetchShared(url);
+    if (res.ok) return (await res.json()) ?? {};
+  } catch (err) {
+    console.warn('Forecast feed unavailable:', url, err);
   }
-  return best;
+  return {};
+}
+
+async function stationObservations(lat, lon, version) {
+  const stations = stationFeeds.flatMap(feed => feed.stations.map(station => ({
+    ...station, feed, km: stationDistanceKm(lat, lon, station),
+  }))).sort((a, b) => a.km - b.km);
+  const region = stations[0].feed.region;
+  const feeds = stationFeeds.filter(feed => feed.region === region);
+  const results = await Promise.all(feeds.map(async feed => {
+    const ids = feed.stations.map(s => s.id).join(',');
+    const json = await forecastJson(`${feed.endpoint}?stations=${ids}&hours=12&component=x&latest_only=true`);
+    if (json.data && version === forecastVersion) lastStationReports.set(feed.name, json);
+    const snapshot = json.data ? json : lastStationReports.get(feed.name);
+    return [feed.name, { snapshot, offline: !json.data }];
+  }));
+  const data = Object.fromEntries(results);
+  return stations.filter(s => s.feed.region === region).map(s => {
+    const { snapshot, offline } = data[s.feed.name];
+    const rows = snapshot?.data?.[s.id] ?? [];
+    const row = latestSample(rows, 'value', 30);
+    const lastTime = row?.time ?? rows.at(-1)?.time ?? snapshot?.missing?.[s.id];
+    const value = row?.value ?? null;
+    return { ...s, value, offline, active: value !== null && Math.abs(value) >= 30,
+      age: Math.floor((Date.now() - utcMillis(lastTime)) / 60000) };
+  });
+}
+
+function utcMillis(iso) {
+  if (!iso) return NaN;
+  return Date.parse(/[zZ]$|[+-]\d\d:\d\d$/.test(iso) ? iso : iso + 'Z');
+}
+
+function latestSample(rows, field, maxAgeMinutes) {
+  const now = Date.now();
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i];
+    const age = now - utcMillis(row.time ?? row.timestamp);
+    if (age > maxAgeMinutes * 60000) break;
+    if (age >= 0 && Number.isFinite(row[field])) return row;
+  }
+  return null;
+}
+
+function latestReading(rows, field, maxAgeMinutes) {
+  return latestSample(rows, field, maxAgeMinutes)?.[field] ?? null;
 }
 
 function mergeHeadsUpEvents(events, mergeWindowMinutes = 30) {
@@ -34,7 +83,7 @@ function mergeHeadsUpEvents(events, mergeWindowMinutes = 30) {
   for (let ev of events) {
     if (!ev.time) continue;
     // Unik nyckel per event-nivå (t.ex. Speed600, KP Kp=5 osv)
-    const key = `${ev.type}||${ev.txt}`;
+    const key = ev.end ? `${ev.type}||${ev.time}` : `${ev.type}||${ev.txt}`;
     if (!grouped[key]) grouped[key] = [];
     grouped[key].push(ev);
   }
@@ -45,11 +94,11 @@ function mergeHeadsUpEvents(events, mergeWindowMinutes = 30) {
     let session = null;
     for (let i = 0; i < arr.length; i++) {
       const ev = arr[i];
-      const t = new Date(ev.time).getTime();
+      const t = utcMillis(ev.time);
       if (!session) {
-        session = { ...ev, start: ev.time, end: ev.time };
+        session = { ...ev, start: ev.time, end: ev.end ?? ev.time };
       } else {
-        const prevT = new Date(arr[i-1].time).getTime();
+        const prevT = utcMillis(arr[i-1].time);
         const diffMin = (t - prevT) / (1000 * 60);
         if (diffMin <= mergeWindowMinutes) {
           session.end = ev.time;
@@ -60,7 +109,7 @@ function mergeHeadsUpEvents(events, mergeWindowMinutes = 30) {
               ? session.start.replace('T',' ').slice(0,16)
               : session.start.replace('T',' ').slice(0,16) + " – " + session.end.replace('T',' ').slice(11,16)
           });
-          session = { ...ev, start: ev.time, end: ev.time };
+          session = { ...ev, start: ev.time, end: ev.end ?? ev.time };
         }
       }
     }
@@ -84,15 +133,18 @@ function detectSolarwindEvents({speedArr, densityArr, btArr, bzArr, kpArr, hpArr
   let heads = [];
 
   // --- 1. CIR och HSS --- //
+  const speedAt = new Map(speedArr.map(row => [row.time, row.value]));
+  const btAt = new Map(btArr.map(row => [row.time, row.value]));
+  const densityAt = new Map(densityArr.map(row => [row.time, row.value]));
   let cir = null, hss = null;
   for (let i = 1; i < densityArr.length; i++) {
     const prevD = densityArr[i-1]?.value ?? 0, currD = densityArr[i].value;
-    const prevBt = btArr[i-1]?.value ?? 0, currBt = btArr[i].value;
-    const currSpeed = speedArr[i].value;
+    const prevBt = btAt.get(densityArr[i-1].time), currBt = btAt.get(densityArr[i].time);
+    const currSpeed = speedAt.get(densityArr[i].time);
     // CIR: density-jump + Bt-jump
     if ((prevD < 10 && currD >= 10) && (currBt - prevBt > 5)) cir = densityArr[i];
     // HSS: hastighet > 550, density låg
-    if (currSpeed >= 550 && currD <= 8 && !hss) hss = speedArr[i];
+    if (currSpeed >= 550 && currD <= 8 && !hss) hss = densityArr[i];
   }
   if (cir) heads.push({
     type: "CIR", time: cir.time, txt: "CIR passage detected",
@@ -157,34 +209,28 @@ function detectSolarwindEvents({speedArr, densityArr, btArr, bzArr, kpArr, hpArr
     desc: "Sudden jump in Bt – possible CME impact or geomagnetic storm onset."
   });
 
-  // --- 5. Strong Southward Bz (<-10 nT, minst 10 min) --- //
-  let bzThreshold = -10;
-  let seqLen = 0, firstBzT = null;
-  for (let i = 0; i < bzArr.length; i++) {
-    if (bzArr[i].value <= bzThreshold) {
-      if (seqLen === 0) firstBzT = bzArr[i].time;
-      seqLen++;
-    } else if (seqLen >= 2) { // 2 datapunkter = ca 10 min om 5-minutersdata
-      heads.push({
-        type: "BZ-", time: firstBzT,
-        txt: "Strong southward Bz",
-        desc: `Bz ≤ -10 nT for at least ${seqLen*5} min – high risk for strong auroras.`
-      });
-      seqLen = 0;
-      firstBzT = null;
-    } else {
-      seqLen = 0;
-      firstBzT = null;
+  // NOAA supplies one-minute measurements. A missing minute breaks continuity.
+  let start = null, previous = null;
+  function finishBzRun() {
+    if (start && previous.ms - start.ms >= 600000) {
+      const minutes = (previous.ms - start.ms) / 60000;
+      heads.push({ type: 'BZ-', time: start.time, end: previous.time,
+        txt: 'Strong southward Bz', desc: `Bz ≤ -10 nT for ${minutes} min.` });
     }
+    start = null;
   }
-  // Om sekvensen är kvar vid slutet
-  if (seqLen >= 2 && firstBzT) {
-    heads.push({
-      type: "BZ-", time: firstBzT,
-      txt: "Strong southward Bz",
-      desc: `Bz ≤ -10 nT for at least ${seqLen*5} min – high risk for strong auroras.`
-    });
+  for (const row of bzArr) {
+    const ms = utcMillis(row.time);
+    if (!Number.isFinite(ms) || row.value > -10 || !Number.isFinite(row.value)) {
+      finishBzRun();
+      previous = null;
+      continue;
+    }
+    if (previous && ms - previous.ms !== 60000) finishBzRun();
+    previous = { time: row.time, ms };
+    if (!start) start = previous;
   }
+  finishBzRun();
 
   // --- 6. Kp-index (från 5 uppåt) --- //
   // NOAA G-klass: Kp5=G1, Kp6=G2, Kp7=G3, Kp8=G4, Kp9=G5
@@ -207,21 +253,11 @@ function detectSolarwindEvents({speedArr, densityArr, btArr, bzArr, kpArr, hpArr
     }
   }
 
-  // --- 7. Hp30 (från 50 uppåt) --- //
-  for (let i = 0; i < hpArr.length; i++) {
-    const hp = hpArr[i].hp30 ?? hpArr[i].value;
-    const hpTime = hpArr[i].timestamp || hpArr[i].time;
-    if (hp >= 50) {
-      let gclass = '';
-      if (hp >= 80) gclass = 'G4/G5? - Extreme';
-      else if (hp >= 60) gclass = 'G2/G3 - Strong';
-      else if (hp >= 50) gclass = 'G1+ - Minor/Moderate';
-      heads.push({
-        type: "HP30",
-        time: hpTime,
-        txt: `Disturbance storm Hp30: ${hp} - ${gclass}`,
-        desc: `Strong geomagnetic disturbance – potential for high-latitude auroras!`
-      });
+  // Hp30 is GFZ's open-ended, Kp-like half-hour index. G classes are for Kp.
+  for (const row of hpArr) {
+    if (Number.isFinite(row.hp30) && row.hp30 >= 5) {
+      heads.push({ type: 'HP30', time: row.timestamp ?? row.time,
+        txt: `Elevated Hp30: ${row.hp30}`, desc: 'Elevated half-hour planetary magnetic activity (GFZ).' });
     }
   }
 
@@ -229,8 +265,8 @@ function detectSolarwindEvents({speedArr, densityArr, btArr, bzArr, kpArr, hpArr
   for (let i = 1; i < btArr.length; i++) {
     if (
       btArr[i-1].value < 10 && btArr[i].value > 20 &&
-      speedArr[i-1].value < 500 && speedArr[i].value > 600 &&
-      densityArr[i-1].value < 10 && densityArr[i].value > 20
+      speedAt.get(btArr[i-1].time) < 500 && speedAt.get(btArr[i].time) > 600 &&
+      densityAt.get(btArr[i-1].time) < 10 && densityAt.get(btArr[i].time) > 20
     ) {
       heads.push({
         type: "CME", time: btArr[i].time,
@@ -246,39 +282,33 @@ function detectSolarwindEvents({speedArr, densityArr, btArr, bzArr, kpArr, hpArr
 
 
 export async function updateAuroraForecasts() {
+  const version = ++forecastVersion;
+  const { lat, lon, tz } = getLocation();
   try {
-    const { lat, lon, tz } = getLocation();
     // Hämtar 12h historik för alla eventdetektorer
     const [
-      bzRes, byRes, densRes, speedRes, btRes,
-      kirxRes, fmiRes, hpRes, kpRes, astroRes, flagsRes
+      bzData, byData, densData, speedData, btData,
+      stations, hpData, kpData, astro, flagsData
     ] = await Promise.all([
-      fetchShared(`/solarwind/timeseries?param=bz&hours=12`),
-      fetchShared(`/solarwind/timeseries?param=by&hours=12`),
-      fetchShared(`/solarwind/timeseries?param=density&hours=12`),
-      fetchShared(`/solarwind/timeseries?param=speed&hours=12`),
-      fetchShared(`/solarwind/timeseries?param=bt&hours=12`),
-      fetchShared(`/magneto/timeseries_multi?stations=KIR&hours=12`),
-      fetchShared(`/magneto_fmi/timeseries?stations=${FMI_STATIONS.map(s => s.id).join(",")}&hours=12&component=x`),
-      fetchShared(`/hp30/timeseries?hours=12`),
-      fetchShared(`/kp/timeseries?hours=12`),
-      fetchShared(`/astro/skyfield-astro?lat=${lat}&lon=${lon}&tz=${encodeURIComponent(tz)}`),
-      fetchShared(`/aurora/flags`)
+      forecastJson('/solarwind/timeseries?param=bz&hours=12'),
+      forecastJson('/solarwind/timeseries?param=by&hours=12'),
+      forecastJson('/solarwind/timeseries?param=density&hours=12'),
+      forecastJson('/solarwind/timeseries?param=speed&hours=12'),
+      forecastJson('/solarwind/timeseries?param=bt&hours=12'),
+      stationObservations(lat, lon, version),
+      forecastJson('/hp30/timeseries?hours=12'),
+      forecastJson('/kp/timeseries?hours=12'),
+      forecastJson(`/astro/skyfield-astro?lat=${lat}&lon=${lon}&tz=${encodeURIComponent(tz)}`),
+      forecastJson('/aurora/flags')
     ]);
 
     // Parse all data
-    const bzArr = (await bzRes.json()).data ?? [];
-    const byArr = (await byRes.json()).data ?? [];
-    const densityArr = (await densRes.json()).data ?? [];
-    const speedArr = (await speedRes.json()).data ?? [];
-    const btArr = (await btRes.json()).data ?? [];
-    const kirxDataRaw = (await kirxRes.json()).data ?? {};
-    const kirxData = kirxDataRaw["KIR"] ?? [];
-    let hp30Arr = (await hpRes.json()).data ?? [];
-    if (!Array.isArray(hp30Arr)) hp30Arr = [];
-    const kpArr = (await kpRes.json()).data ?? [];
-    const astro = await astroRes.json();
-    const flags = (await flagsRes.json()).flags;
+    const [bzArr, byArr, densityArr, speedArr, btArr, hp30Arr, kpArr] =
+      [bzData, byData, densData, speedData, btData, hpData, kpData].map(series =>
+        Array.isArray(series.data) ? series.data : []);
+    const flags = flagsData.flags ?? [];
+    const current = getLocation();
+    if (version !== forecastVersion || current.lat !== lat || current.lon !== lon || current.tz !== tz) return;
 
     // Detektera heads-up events (solar wind/geomagnetic alerts)
     const headsUp = detectSolarwindEvents({
@@ -286,14 +316,6 @@ export async function updateAuroraForecasts() {
     });
 
 // Visa heads-up / badge i #aurora-headsup
-let headsUpToShow = headsUp.slice().sort((a, b) => {
-  // Sortera SENASTE först (descending)
-  // Om "a.time" eller "b.time" saknas, lägg dem sist
-  if (!a.time) return 1;
-  if (!b.time) return -1;
-  return b.time.localeCompare(a.time);
-});
-
 let headsUpMerged = mergeHeadsUpEvents(headsUp, 30);
 headsUpMerged.sort((a, b) => {
   const ta = new Date(a.end || a.start || a.time).getTime();
@@ -319,85 +341,24 @@ const headsUpBox = document.getElementById("aurora-headsup");
 if (headsUpBox) headsUpBox.innerHTML = headsUpHtml;
 
     // Hämta senaste värden (från arr)
-    const bz = bzArr.at(-1)?.value ?? 0;
-    const by = byArr.at(-1)?.value ?? 0;
-    const dens = densityArr.at(-1)?.value ?? 0;
-    const speed = speedArr.at(-1)?.value ?? 0;
-    const bt = btArr.at(-1)?.value ?? 0;
-    const hp30 = hp30Arr.at(-1)?.hp30 ?? null;
-    const kp = kpArr.at(-1)?.kp ?? null;
-
-    // Magnetometer-data
-    const fmiData = (await fmiRes.json()).data ?? {};
-    const nearestStation = nearestMagnetometerStation(lat, lon);
-    let nearestMag = 0;
-    if (nearestStation.id === "KIR") {
-      nearestMag = kirxData.length ? kirxData.at(-1)?.value ?? 0 : 0;
-    } else {
-      const nearestDataArr = (fmiData[nearestStation.id] || []);
-      nearestMag = nearestDataArr.length ? nearestDataArr.at(-1)?.value ?? 0 : 0;
-    }
-    let allFMI = [];
-    for (const arr of Object.values(fmiData)) {
-      if (arr && arr.length) allFMI.push(arr.at(-1)?.value ?? 0);
-    }
-    const maxMag = allFMI.length ? Math.max(...allFMI.map(v => Math.abs(v))) : 0;
-
-    // Weather
-    const weather = window.latestWeather;
-    let weatherMsg = "";
-    if (weather) {
-      const hArr = weather.hourArr || [];
-      const cloud = weather.cloudArr || [];
-      const cloudThresholdClear = 20, cloudThresholdCloudy = 70;
-      const clearNow = cloud[0] <= cloudThresholdClear;
-      const cloudyNow = cloud[0] >= cloudThresholdCloudy;
-      const firstCloudyIdx = cloud.slice(1).findIndex(c => c >= cloudThresholdCloudy);
-      const firstCloudyHour = firstCloudyIdx !== -1 ? hArr[firstCloudyIdx + 1] : null;
-      const firstClearIdx = cloud.slice(1).findIndex(c => c <= cloudThresholdClear);
-      const firstClearHour = firstClearIdx !== -1 ? hArr[firstClearIdx + 1] : null;
-      if (clearNow && firstCloudyHour) {
-        weatherMsg += `Clear sky now, clouds expected to increase from ${firstCloudyHour}:00. `;
-      } else if (clearNow) {
-        weatherMsg += "Clear sky expected throughout the next 6 hours. ";
-      } else if (cloudyNow && firstClearHour) {
-        weatherMsg += `Cloudy now, expected to clear from ${firstClearHour}:00. `;
-      } else if (cloudyNow) {
-        weatherMsg += "Heavy clouds expected for the next 6 hours. ";
-      } else if (cloud.some(c => c > cloudThresholdClear && c < cloudThresholdCloudy)) {
-        weatherMsg += "Partly cloudy skies expected over the next 6 hours. ";
-      } else {
-        weatherMsg += "Mixed cloud cover expected. ";
-      }
-
-      const fog = weather.fogArr || [];
-      const fogThreshold = 40;
-      const fogNow = fog[0] >= fogThreshold;
-      const fogFirstIdx = fog.slice(1).findIndex(f => f >= fogThreshold);
-      const fogFirstHour = fogFirstIdx !== -1 ? hArr[fogFirstIdx + 1] : null;
-      if (fogNow && fogFirstHour) {
-        weatherMsg += "Fog currently reduces visibility and may persist. ";
-      } else if (fogNow) {
-        weatherMsg += "Fog currently reduces visibility. ";
-      } else if (fogFirstHour) {
-        weatherMsg += `Fog may develop later, especially from ${fogFirstHour}:00. `;
-      }
-
-      if (weather.tempArr && weather.windArr) {
-        const avgTemp = Math.round(weather.tempArr.reduce((a, b) => a + b, 0) / weather.tempArr.length);
-        const avgWind = Math.round(weather.windArr.reduce((a, b) => a + b, 0) / weather.windArr.length);
-        weatherMsg += `Avg. temp: ${avgTemp}°C, avg. wind: ${avgWind} m/s. `;
-      }
-      weatherMsg += hArr.length ? `(Forecast: ${hArr[0]}:00–${hArr.at(-1)}:00)` : "";
-    }
+    const bz = latestReading(bzArr, 'value', 30);
+    const by = latestReading(byArr, 'value', 30);
+    const dens = latestReading(densityArr, 'value', 30);
+    const speed = latestReading(speedArr, 'value', 30);
+    const bt = latestReading(btArr, 'value', 30);
+    const hp30 = latestReading(hp30Arr, 'hp30', 90);
+    const kp = latestReading(kpArr, 'kp', 30);
+    const weather = window.latestWeather?.lat === lat && window.latestWeather?.lon === lon
+      && window.latestWeather?.tz === tz ? window.latestWeather : null;
+    const weatherMsg = weather?.weatherMsg ?? '';
 
     // Måne
 	let moonMsg = "";
-	if (weather && weather.moon) {
+	if (Number.isFinite(weather?.moon?.moon_phase)) {
 	  const moon = weather.moon;
 	  moonMsg = `Moon phase: ${moon.moon_phase}%`;
 	  const hasMoon = (moon.moonrise && moon.moonrise !== "-") || (moon.moonset && moon.moonset !== "-");
-	  const maxAlt = typeof moon.moon_altitude === "number" ? moon.moon_altitude : null;
+	  const maxAlt = typeof moon.moon_max_altitude === "number" ? moon.moon_max_altitude : null;
 	  let neverVisible = false;
 	  if (hasMoon) {
 		if (moon.moonrise && moon.moonrise !== "-") {
@@ -406,10 +367,10 @@ if (headsUpBox) headsUpBox.innerHTML = headsUpHtml;
 		} else if (moon.moonset && moon.moonset !== "-") {
 		  moonMsg += `. Moonset: ${moon.moonset}`;
 		}
-		if (maxAlt !== null) moonMsg += `. Max altitude tonight: ${maxAlt}°`;
+		if (maxAlt !== null) moonMsg += `. Maximum altitude today: ${maxAlt}°`;
 	  } else if (maxAlt !== null && maxAlt > 0) {
 		moonMsg += `. The moon never sets tonight (always visible above the horizon). Max altitude: ${maxAlt}°`;
-	  } else {
+	  } else if (maxAlt !== null) {
 		neverVisible = true;
 		moonMsg += `. The moon never rises above the horizon tonight.`;
 		if (maxAlt !== null) moonMsg += ` (Max altitude: ${maxAlt}°)`;
@@ -420,102 +381,66 @@ if (headsUpBox) headsUpBox.innerHTML = headsUpHtml;
 	}
 
 
-    // ---- Forecast logic (day/twilight/night) ----
-    const sunriseStr = (astro.sunrise ?? "").toString().trim();
-    const sunsetStr = (astro.sunset ?? "").toString().trim();
-    const dawnStr = (astro.astro_dawn ?? "").toString().trim();
-    const duskStr = (astro.astro_dusk ?? "").toString().trim();
-    const isNoSunrise = sunriseStr === "" || sunriseStr === "-";
-    const isNoSunset = sunsetStr === "" || sunsetStr === "-";
-    let isDay = false, isNight = false, isTwilight = false, isMidnightSun = false, isPolarNight = false;
-
-    const parseTime = str => (str && str.includes(":")) ? parseInt(str.split(":")[0]) + parseInt(str.split(":")[1]) / 60 : null;
-    const hour = new Date().getHours() + new Date().getMinutes() / 60;
-    const sunrise = parseTime(sunriseStr);
-    const sunset = parseTime(sunsetStr);
-    const dawn = parseTime(dawnStr);
-    const dusk = parseTime(duskStr);
-
-    if (isNoSunrise && isNoSunset) {
-      const sunAltNoon = typeof astro.sun_altitude_noon === "number" ? astro.sun_altitude_noon : -99;
-      if (sunAltNoon > 0) {
-        isMidnightSun = true;
-        isDay = true;
-      } else {
-        isPolarNight = true;
-        isNight = true;
-      }
-    } else if (!isNoSunrise && !isNoSunset) {
-      if (dawn && hour >= dawn && hour < sunrise) {
-        isTwilight = true;
-      } else if (dusk && hour >= sunset && hour < dusk) {
-        isTwilight = true;
-      } else if (hour >= sunrise && hour < sunset) {
-        isDay = true;
-      } else {
-        isNight = true;
-      }
+    const sunAltitude = astro.sun_altitude;
+    const nearest = stations[0];
+    const fmi = stations.filter(s => s.feed.name === 'FMI/IMAGE');
+    const freshFmi = fmi.filter(s => s.value !== null);
+    // Distance decides which active station to cite within each network.
+    // In Fennoscandia FMI is the primary regional observation; a quiet or
+    // offline station in another network cannot cancel that observation.
+    const signal = freshFmi.find(s => s.active) ?? stations.find(s => s.active);
+    const strongWind = (bz !== null && (bz <= -5 || (bz <= -2 && !!signal)))
+      || (by !== null && by <= -8 && dens >= 10 && speed >= 500 && bt >= 10 && !!signal);
+    const globalStrongTrigger = kp >= 5 || hp30 >= 6;
+    const extremeGlobal = kp >= 7 || hp30 >= 8 || (bz !== null && bz <= -10);
+    let activity;
+    if (signal) {
+      activity = `Magnetic disturbance at ${signal.feed.name} station ${signal.name} (${Math.round(signal.km)} km away, ΔX ${signal.value} nT, ${signal.age} min ago).`;
+      if (strongWind || globalStrongTrigger) activity += ' Solar wind or planetary indices also favor aurora.';
+    } else if (globalStrongTrigger || strongWind) {
+      activity = 'Solar wind or planetary indices indicate elevated activity.';
     }
 
-    // Aurora triggers (ingen ändring)
-    const standardAuroraTrigger = (bz <= -2 && (Math.abs(nearestMag) >= 30 || maxMag >= 30)) || bz <= -5;
-    const byAuroraTrigger = (
-      by <= -8 &&
-      dens >= 10 &&
-      speed >= 500 &&
-      bt >= 10 &&
-      (Math.abs(nearestMag) >= 30 || maxMag >= 30)
-    );
-    const globalStrongTrigger = (kp !== null && kp >= 5) || (hp30 !== null && hp30 >= 60);
-    const extremeGlobal = (
-      (kp !== null && kp >= 7) ||
-      (hp30 !== null && hp30 >= 80) ||
-      (bz !== null && bz <= -10)
-    );
-    const hasLocalDisturbance = (Math.abs(nearestMag) >= 30 || maxMag >= 30);
-
-    // Textlogik (ingen ändring)
-    let mainMsg = "", headline = "", extraTip = "";
-    if (isDay || isMidnightSun) {
-      headline = "The sky is too bright for aurora observations at this location.";
-      mainMsg = "";
-      if (standardAuroraTrigger || byAuroraTrigger || globalStrongTrigger) {
-        mainMsg += "<br><b>However, geomagnetic and solar wind conditions are currently strong.</b> If these conditions continue, be ready to check after sunset.";
-      }
-    } else if (isTwilight) {
-      headline = "Aurora is rarely visible during twilight.";
-      mainMsg = "Aurora can sometimes be observed during astronomical twilight, but only during very strong geomagnetic storms.";
-      if (standardAuroraTrigger || byAuroraTrigger || globalStrongTrigger) {
-        mainMsg += "<br><b>Strong conditions detected:</b> If the sky darkens further, there may be a chance for aurora.";
+    let headline, mainMsg = '', extraTip = '';
+    if (!Number.isFinite(sunAltitude)) {
+      headline = 'Daylight conditions are unavailable for this location.';
+    } else if (sunAltitude >= -0.833) {
+      headline = 'The sky is too bright for aurora observations at this location.';
+      if (activity) mainMsg = activity + ' Check again after dark.';
+    } else if (sunAltitude >= -18) {
+      const phase = sunAltitude >= -6 ? 'Civil' : sunAltitude >= -12 ? 'Nautical' : 'Astronomical';
+      headline = `${phase} twilight at this location.`;
+      mainMsg = `The Sun is ${Math.abs(sunAltitude).toFixed(1)}° below the horizon. Sky brightness can reduce aurora visibility.`;
+      if (activity) extraTip = activity;
+    } else {
+      headline = 'Aurora conditions at this location';
+      if (activity) {
+        mainMsg = (signal ? '<b>Regional aurora watch.</b> ' : '<b>Aurora possible.</b> ') + activity;
+      } else if (!stations.some(s => s.value !== null) || bz === null) {
+        mainMsg = 'Coverage is incomplete. A quiet local sky cannot be inferred from the available data.';
       } else {
-        mainMsg += "<br>Only very strong storms make aurora visible at this time.";
-      }
-      extraTip = "If these conditions persist or strengthen, check again after dark.";
-    } else if (isNight || isPolarNight) {
-      headline = "Aurora forecast for tonight:";
-      if ((standardAuroraTrigger || byAuroraTrigger) && hasLocalDisturbance) {
-        mainMsg = "<b>Aurora possible for your location.</b> Conditions are favorable due to strong magnetic disturbance and suitable solar wind values.";
-      } else if ((globalStrongTrigger || extremeGlobal) && !hasLocalDisturbance) {
-        mainMsg = "<b>Strong geomagnetic storm detected, but no local disturbances recorded.</b> Aurora is unlikely at this location right now.";
-      } else {
-        mainMsg = "<b>No aurora conditions at the moment.</b>";
+        mainMsg = 'The available measurements do not currently meet the aurora thresholds.';
       }
     }
+    if (!Number.isFinite(sunAltitude) && activity) mainMsg = activity;
 
     let infoParts = [];
     if (weatherMsg) infoParts.push(weatherMsg);
     if (moonMsg) infoParts.push(moonMsg);
     if (extraTip) infoParts.push(extraTip);
 
-    let nearestInfo = nearestStation
-      ? `Based on <b>your selected position</b> (${lat.toFixed(2)}, ${lon.toFixed(2)}). Nearest magnetometer: <b>${nearestStation.name}</b> (${nearestStation.lat.toFixed(2)}, ${nearestStation.lon.toFixed(2)})`
-      : `Based on <b>your selected position</b> (${lat.toFixed(2)}, ${lon.toFixed(2)})`;
+    let stationStatus = 'no measurement in the last 30 min';
+    if (nearest.value !== null) stationStatus = `ΔX ${nearest.value} nT, ${nearest.age} min ago`;
+    else if (nearest.age >= 30) stationStatus += `, last report ${nearest.age} min ago`;
+    const offline = [...new Set(stations.filter(s => s.offline).map(s => s.feed.name))];
+    const networkInfo = fmi.length ? `FMI/IMAGE: ${freshFmi.length}/${fmi.length} stations reporting in the last 30 min${freshFmi.length ? `, ${freshFmi.filter(s => s.active).length} disturbed` : ''}. ` : '';
+    const feedStatus = offline.length ? ` Latest update unavailable from ${offline.join(', ')}.` : '';
+    const nearestInfo = `${networkInfo}Nearest station: <b>${nearest.name}</b> (${Math.round(nearest.km)} km, ${stationStatus}).${feedStatus}`;
 
     // Storm badge
     let alertBadge = "";
     if (extremeGlobal) {
       alertBadge = `<span style="
-        position:absolute;top:10px;right:18px;
         background:#f23d3d;
         color:#fff;
         border-radius:20px;
@@ -528,7 +453,7 @@ if (headsUpBox) headsUpBox.innerHTML = headsUpHtml;
         z-index:12;
       ">
         <svg width="12" height="12" style="margin-right:4px" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9" fill="#fff" stroke="#fff" stroke-width="2"/><text x="10" y="15" text-anchor="middle" font-size="13" fill="#f23d3d" font-family="sans-serif" font-weight="bold">!</text></svg>
-        STORM ALERT
+        ELEVATED ACTIVITY
       </span>`;
     }
 
@@ -536,10 +461,9 @@ if (headsUpBox) headsUpBox.innerHTML = headsUpHtml;
     if (condAlert) {
       condAlert.innerHTML =
         `<div style="position:relative">
-           ${alertBadge}
-           <div style="font-size:0.7em;color:#fff7;margin-bottom:0.4em;font-style:italic">${nearestInfo}</div>
-           <b>${headline}</b><br>
+           <b>${headline}</b> ${alertBadge}<br>
            <span style="font-size:0.7em">${mainMsg}</span>
+           <div style="font-size:0.7em;color:#ccc;margin-top:0.4em">${nearestInfo}</div>
            ${infoParts.length ? "<br><span style='color:#fff7; font-size:0.7em'>" + infoParts.join(" ") + "</span>" : ""}
          </div>`;
     }
@@ -560,6 +484,7 @@ if (headsUpBox) headsUpBox.innerHTML = headsUpHtml;
       ).join('');
     }
   } catch (err) {
+    if (version !== forecastVersion) return;
     console.error('updateAuroraForecasts error:', err);
     const condAlert = document.getElementById('cond-alert');
     if (condAlert) {

@@ -307,11 +307,11 @@ async function fetchHp() {
   try {
     const res = await fetch('/ovation/latest_hp');
     const data = await res.json();
-    if (data.hemispheric_power_north != null && data.hemispheric_power_south != null) {
+    if (data.hemispheric_power_north != null || data.hemispheric_power_south != null) {
       document.getElementById('aurora-hp-info').innerHTML = `
-        <b>Hemispheric Power North:</b> ${data.hemispheric_power_north.toFixed(1)} GW<br>
-        <b>Hemispheric Power South:</b> ${data.hemispheric_power_south.toFixed(1)} GW<br>
-        <span style="font-size:0.93em;color:#a2d7bb;">${data.ts}</span>
+        <b>Hemispheric Power North:</b> ${data.hemispheric_power_north?.toFixed(1) ?? '–'} GW<br>
+        <b>Hemispheric Power South:</b> ${data.hemispheric_power_south?.toFixed(1) ?? '–'} GW<br>
+        <span style="font-size:0.93em;color:#a2d7bb;">Observed ${data.ts}${data.forecast_time ? '<br>Forecast ' + data.forecast_time : ''}</span>
       `;
     } else {
       document.getElementById('aurora-hp-info').innerHTML = "<i>No HP-data available</i>";
@@ -341,7 +341,7 @@ function getStats(arr, periodMinutes, key) {
     return t >= threshold;
   });
 
-  const vals = filtered.map(r => r[key]).filter(x => typeof x === "number" && !isNaN(x) && x > 0);
+  const vals = filtered.map(r => r[key]).filter(x => typeof x === "number" && Number.isFinite(x) && x >= 0);
   if (!vals.length) return { avg: null, min: null, max: null };
   return {
     avg: vals.reduce((a, b) => a + b, 0) / vals.length,
@@ -352,10 +352,10 @@ function getStats(arr, periodMinutes, key) {
 
   const kpRes = await fetchShared('/kp/timeseries?hours=12');
   const kpJson = await kpRes.json();
-  let kp = 0, kp1h = {}, kp3h = {}, kp6h = {}, kp12h = {};
+  let kp = null, kp1h = {}, kp3h = {}, kp6h = {}, kp12h = {};
   if (kpJson.data && kpJson.data.length) {
     const validKp = kpJson.data.filter(r => typeof r.kp === 'number' && !isNaN(r.kp));
-    kp = validKp.length ? validKp.at(-1).kp : 0;
+    kp = validKp.length ? validKp.at(-1).kp : null;
 	kp1h    = getStats(validKp, 60,  'kp');
 	kp3h    = getStats(validKp, 180, 'kp');
 	kp6h    = getStats(validKp, 360, 'kp');
@@ -365,10 +365,10 @@ function getStats(arr, periodMinutes, key) {
   // --- HP30 ---
   const hpRes = await fetchShared('/hp30/timeseries?hours=12');
   const hpJson = await hpRes.json();
-  let hp30 = 0, hp30_1h = {}, hp30_3h = {}, hp30_6h = {}, hp30_12h = {};
+  let hp30 = null, hp30_1h = {}, hp30_3h = {}, hp30_6h = {}, hp30_12h = {};
   if (hpJson.data && hpJson.data.length) {
     const validHp = hpJson.data.filter(r => typeof r.hp30 === 'number' && !isNaN(r.hp30));
-    hp30 = validHp.length ? validHp.at(-1).hp30 : 0;
+    hp30 = validHp.length ? validHp.at(-1).hp30 : null;
 	hp30_1h = getStats(validHp, 60,  'hp30');
 	hp30_3h = getStats(validHp, 180, 'hp30');
 	hp30_6h = getStats(validHp, 360, 'hp30');
@@ -575,10 +575,9 @@ window.setAuroraForecastLocation = async function () {
     updateSolarLunarBox();
     return;
   }
-  await updateWeather(() => {
-    updateSolarLunarBox();
-	updateAuroraForecasts();
-  });
+  await runSection('E-WEATHER', '#weather-card-container', updateWeather);
+  updateSolarLunarBox();
+  await updateAuroraForecasts();
 };
 
 document.getElementById('topbar-overlay-close').onclick = function () {
@@ -917,7 +916,7 @@ async function ensureImageList(label) {
     window.imageData = window.imageData || {};
     window.indices = window.indices || {};
     if (window.imageData[label] && window.imageData[label].length) return true;
-    const res = await fetch(`/images/list?label=${encodeURIComponent(label)}&_=${Date.now()}`);
+    const res = await fetch(`/images/list?label=${encodeURIComponent(label)}${label === "Synoptic Map" ? "&limit=1" : ""}&_=${Date.now()}`);
     const files = (await res.json()).files || [];
     window.imageData[label] = files;
     window.indices[label] = 0;
@@ -988,7 +987,7 @@ window.showSolarImagesInline = async function () {
       } else if (type === "huxt") {
         res = await fetch(`/huxt/list`);
       } else {
-        res = await fetch(`/images/list?label=${encodeURIComponent(label)}&_=${Date.now()}`);
+        res = await fetch(`/images/list?label=${encodeURIComponent(label)}${label === "Synoptic Map" ? "&limit=1" : ""}&_=${Date.now()}`);
         const files = (await res.json()).files || [];
         window.imageData[label] = files;
         window.indices[label] = 0;
@@ -1539,7 +1538,7 @@ function isoDayFromDateInput(v) {
   return "";
 }
 
-function nearestByTime(items, tMs) {
+function nearestByTime(items, tMs, maxMinutes) {
   if (!items || items.length === 0 || tMs == null) return null;
 
   let lo = 0, hi = items.length - 1;
@@ -1550,8 +1549,8 @@ function nearestByTime(items, tMs) {
   }
   const a = items[lo];
   const b = items[Math.max(0, lo - 1)];
-  if (!b) return a;
-  return (Math.abs(a.t - tMs) < Math.abs(b.t - tMs)) ? a : b;
+  const closest = Math.abs(a.t - tMs) < Math.abs(b.t - tMs) ? a : b;
+  return Math.abs(closest.t - tMs) <= maxMinutes * 60000 ? closest : null;
 }
 
 function ensureHiDpiCanvas(canvas, defaultCssHeight = 160) {
@@ -1644,7 +1643,7 @@ function replayMagCurrentText(seriesMap, tMs, preferredStation = null) {
     ? preferredStation
     : keys.sort()[0];
 
-  const now = nearestByTime(seriesMap[st] || [], tMs);
+  const now = nearestByTime(seriesMap[st] || [], tMs, 5);
   if (now?.value == null) return '';
   return `${replayFmtNum(now.value, 2)} NT (${st})`;
 }
@@ -1855,17 +1854,20 @@ function replaySetTime(tMs) {
   const sdoImg = document.getElementById("replay-sdo-img");
   const label = document.getElementById("replay-time-label");
 
-  const a = nearestByTime(replayState.allsky, tMs);
-  const s = nearestByTime(replayState.sdo, tMs);
+  const a = nearestByTime(replayState.allsky, tMs, 5);
+  const s = nearestByTime(replayState.sdo, tMs, 20);
 
-  if (a && allskyImg && allskyImg.dataset.lastUrl !== a.url) {
-    allskyImg.src = `${a.url}${a.url.includes("?") ? "&" : "?"}v=${Date.now()}`;
-    allskyImg.dataset.lastUrl = a.url;
-  }
-
-  if (s && sdoImg && sdoImg.dataset.lastUrl !== s.url) {
-    sdoImg.src = `${s.url}${s.url.includes("?") ? "&" : "?"}v=${Date.now()}`;
-    sdoImg.dataset.lastUrl = s.url;
+  for (const [img, frame] of [[allskyImg, a], [sdoImg, s]]) {
+    if (!img) continue;
+    if (!frame) {
+      img.removeAttribute("src");
+      delete img.dataset.lastUrl;
+      img.alt = "No image near this replay time";
+    } else if (img.dataset.lastUrl !== frame.url) {
+      img.src = frame.url;
+      img.dataset.lastUrl = frame.url;
+      img.alt = frame.filename || frame.url;
+    }
   }
 
   if (label) {
@@ -1873,12 +1875,9 @@ function replaySetTime(tMs) {
     label.textContent = `${d.toLocaleString()} (local)`;
   }
 
-  if (!s && sdoImg) {
-    sdoImg.removeAttribute("src");
-  }
 
   // Update header "current" values if elements exist
-  const swNow = nearestByTime(replayState.solarwind, tMs);
+  const swNow = nearestByTime(replayState.solarwind, tMs, 5);
   replaySetText(
     'replay-sw-speed-current',
     swNow?.speed != null ? `${replayFmtNum(swNow.speed, 2)} KM/S` : ''
@@ -1900,10 +1899,10 @@ function replaySetTime(tMs) {
     swNow?.by != null ? `${replayFmtNum(swNow.by, 2)} NT` : ''
   );
 
-  const kpNow = nearestByTime(replayState.kp, tMs);
+  const kpNow = nearestByTime(replayState.kp, tMs, 10);
   replaySetText('replay-kp-current', kpNow?.kp != null ? `${replayFmtNum(kpNow.kp, 1)}` : '');
 
-  const hp30Now = nearestByTime(replayState.hp30, tMs);
+  const hp30Now = nearestByTime(replayState.hp30, tMs, 30);
   replaySetText('replay-hp30-current', hp30Now?.hp30 != null ? `${replayFmtNum(hp30Now.hp30, 0)}` : '');
 
   // Magnetometer "current" values (split: IRF / FMI / GLOBAL)
@@ -1984,30 +1983,16 @@ async function replayLoadDay(dateStr, station) {
 
   // Magnetometer: keep as station->series map for multi-line rendering
   replayState.magnetometer = {};
-  const magMap = (man.magnetometer || {});
-  if ((station || "").toUpperCase() === "ALL") {
-    for (const [st, arr] of Object.entries(magMap)) {
-      replayState.magnetometer[st] = (arr || [])
-			.map(r => ({ t: toEpochMsUtc(r.time), value: Number(r.value) }))
-			.filter(r => r.t != null && replayMagValueOk(r.value))
-        .sort((a, b) => a.t - b.t);
-    }
-
-  // Build split magnetometer maps for the three Replay charts
-  {
-    const split = replaySplitMagSeriesMap(replayState.magnetometer);
-    replayState.mag_irf = split.irf;
-    replayState.mag_fmi = split.fmi;
-    replayState.mag_global = split.global;
-  }
-
-  } else {
-    const arr = (magMap?.[station] || []);
-    replayState.magnetometer[station] = (arr || [])
+  for (const [st, rows] of Object.entries(man.magnetometer ?? {})) {
+    replayState.magnetometer[st] = rows
       .map(r => ({ t: toEpochMsUtc(r.time), value: r.value }))
-      .filter(r => r.t != null)
+      .filter(r => r.t != null && Number.isFinite(r.value) && replayMagValueOk(r.value))
       .sort((a, b) => a.t - b.t);
   }
+  const split = replaySplitMagSeriesMap(replayState.magnetometer);
+  replayState.mag_irf = split.irf;
+  replayState.mag_fmi = split.fmi;
+  replayState.mag_global = split.global;
 
   replayState.kp = (man.kp || [])
     .map(r => ({ t: toEpochMsUtc(r.time), kp: r.kp }))
@@ -2174,6 +2159,7 @@ document.addEventListener("DOMContentLoaded", async function() {
   refreshCardIfActive('aurora-oval');
   refreshCardIfActive('kp-gauges');
   setupOverlayClassic();
+  setupSynopticOverlay();
   setupMagnetometerFMIEvents();
   setupMagnetometerGlobalEvents();
   // Hidden or collapsed cards start when shown/expanded; see CARD_GROUPS.
@@ -2456,7 +2442,15 @@ if (btn) {
   // ...lägg till här om du har fler modaler, overlays eller paneler...
 
   // === PERIODISKA UPPDATERINGAR ===
-  setInterval(() => refreshCardIfActive('forecast'), 300000);
+  // Match the station collectors' minute cadence while the forecast is visible.
+  setInterval(() => {
+    if (!document.hidden && isCardActive('forecast') && isDisplayed(cardElement('forecast'))) {
+      updateAuroraForecasts();
+    }
+  }, 60_000);
+  setInterval(() => {
+    if (isCardActive('forecast')) runSection('E-FORECAST', '#aurora-conditions', () => loadSolarEvents());
+  }, 300_000);
   setInterval(() => {
     if (!startedSections.has('magnetometer')) return;
     runSectionStart('magnetometer', magnetometerSteps({ ids: ['mag-irf', 'mag-fmi'] }));

@@ -114,13 +114,21 @@ async function fetchWeatherForecast() {
   return await res.json();
 }
 
+// The public weather API keeps each provider's native vis field for compatibility.
 function parseWeatherData(res, tz) {
-  if (!res) return { hourly: [] };
-  const arr = res.hourly || [];
+  const source = res?.source;
+  const arr = (res?.hourly ?? []).map(row => {
+    const vis = Number.isFinite(row.vis) && row.vis >= 0 ? row.vis : null;
+    let visibilityM = null, fogArea = null;
+    if (source === 'MET Norway') fogArea = vis !== null && vis <= 100 ? vis : null;
+    else if (source === 'SMHI' && vis !== null) visibilityM = vis * 1000;
+    else if (source === 'FMI' || source === 'Open-Meteo') visibilityM = vis;
+    return { ...row, visibilityM, fogArea };
+  });
   return {
     hourly: arr,
     cloudArr: arr.map(r => r.moln ?? null),
-    fogArr: arr.map(r => r.vis != null ? Math.max(0, Math.round((1 - (r.vis/10000))*100)) : null),
+    limitedVisibility: arr.map(row => (row.visibilityM !== null && row.visibilityM < 1000) || row.fogArea >= 40),
     tempArr: arr.map(r => r.temp ?? null),
     dewArr: arr.map(r => r.dew ?? null),
     windArr: arr.map(r => r.wind ?? null),
@@ -130,7 +138,7 @@ function parseWeatherData(res, tz) {
       const d = new Date(r.tid);
       return d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', timeZone: tz });
     }),
-    source: res.source || "No data"
+    source: source || "No data"
   };
 }
 
@@ -141,8 +149,8 @@ function pickWeatherIcon(r, isDay, source = "") {
   const isSleet = r.sleet && r.sleet > 0.2;
   const isHail = r.hail && r.hail > 0.2;
   const isThunder = r.thunder || false; // Sätt detta via kod om du vill!
-  const isFog = typeof r.vis === "number" && r.vis < 1500;
-  const isHaze = typeof r.vis === "number" && r.vis >= 1500 && r.vis < 5000;
+  const isFog = (r.visibilityM !== null && r.visibilityM < 1000) || r.fogArea >= 40;
+  const isHaze = r.visibilityM !== null && r.visibilityM >= 1000 && r.visibilityM < 5000;
   const isCloudy = (r.moln ?? 0) >= 80;
   const isPartlyCloudy = (r.moln ?? 0) >= 20 && (r.moln ?? 0) < 80;
   const isClear = (r.moln ?? 0) < 20;
@@ -210,6 +218,8 @@ export async function showWeather(containerId = 'weather-card-scroll') {
   const { lat, lon, tz } = getCoords();
   const place = getLocation().name;
   const weatherRaw = await fetchWeatherForecast();
+  const current = getLocation();
+  if (lat !== current.lat || lon !== current.lon || tz !== current.tz) return;
   const weather = parseWeatherData(weatherRaw, tz);
   const rows = weather.hourly;
 
@@ -252,8 +262,8 @@ export async function showWeather(containerId = 'weather-card-scroll') {
 				<span>${r.moln ?? '-'}%</span>
 			  </div>
 			  <div class="weather-detail">
-				<img src="/data/icons/fog.svg" class="detail-icon" alt="Fog">
-				<span>${r.vis != null ? Math.max(0, Math.round((1 - (r.vis/10000))*100)) : '-'}%</span>
+				<img src="/data/icons/fog.svg" class="detail-icon" alt="${r.fogArea != null ? 'Fog cover' : 'Visibility'}" title="${r.fogArea != null ? 'Fog cover' : 'Visibility'}">
+				<span>${r.visibilityM != null ? (r.visibilityM / 1000).toFixed(1) + ' km' : r.fogArea != null ? r.fogArea + '%' : '–'}</span>
 			  </div>
 			  <div class="weather-detail">
 				<img src="/data/icons/raindrop.svg" class="detail-icon" alt="Rain">
@@ -290,14 +300,13 @@ export async function showWeather(containerId = 'weather-card-scroll') {
 }
 
 export async function getParsedWeatherAndSunMoon(lat, lon, tz) {
-  if (!lat || !lon || !tz) {
+  if (lat == null || lon == null || !tz) {
     const loc = getLocation();
     lat = loc.lat;
     lon = loc.lon;
     tz = loc.tz;
   }
-  const place = getLocation().name;
-  const res = await fetchWeatherForecast(lat, lon, place);
+  const res = await fetchWeatherForecast();
   const parsed = parseWeatherData(res, tz);
 
   // Behåll sun och moon-data precis som tidigare (från state.js)
@@ -339,114 +348,43 @@ export async function getParsedWeatherAndSunMoon(lat, lon, tz) {
 }
 
 
-export async function updateWeather(callback) {
+export async function updateWeather() {
   const { lat, lon, tz } = getCoords();
   const weather = await getParsedWeatherAndSunMoon(lat, lon, tz);
 
-  // Samma logik som tidigare, men återanvänd arrayer från weather
-  const {
-    cloudArr, fogArr, tempArr, dewArr, windArr, hourArr, moon
-  } = weather;
-
-  // Använd 6h lookahead
-  const lookahead = Math.min(6, cloudArr.length);
-
-  // Plocka arrayer för 6h
-  const cArr = cloudArr.slice(0, lookahead);
-  const fArr = fogArr.slice(0, lookahead);
-  const tArr = tempArr.slice(0, lookahead);
-  const dArr = dewArr.slice(0, lookahead);
-  const wArr = windArr.slice(0, lookahead);
-  const hArr = hourArr.slice(0, lookahead);
-
-  // Analys av moln och dimma
-  const cloudThresholdClear = 20, cloudThresholdCloudy = 70;
-  const isClearNow = cArr[0] <= cloudThresholdClear;
-  const isCloudyNow = cArr[0] >= cloudThresholdCloudy;
-  const willBeCloudy = cArr.slice(1).some(c => c >= cloudThresholdCloudy);
-  const willBeClear = cArr.slice(1).some(c => c <= cloudThresholdClear);
-
-  const firstCloudyIdx = cArr.slice(1).findIndex(c => c >= cloudThresholdCloudy);
-  const firstClearIdx = cArr.slice(1).findIndex(c => c <= cloudThresholdClear);
-  const firstCloudyHour = firstCloudyIdx !== -1 ? hArr[firstCloudyIdx+1] : null;
-  const firstClearHour = firstClearIdx !== -1 ? hArr[firstClearIdx+1] : null;
-
-  const fogThreshold = 40;
-  const isFogNow = fArr[0] >= fogThreshold;
-  const willBeFog = fArr.slice(1).some(f => f >= fogThreshold);
-  const firstFogIdx = fArr.slice(1).findIndex(f => f >= fogThreshold);
-  const firstFogHour = firstFogIdx !== -1 ? hArr[firstFogIdx+1] : null;
-
-  // Temperatur/vind/daggpunkt
-  const avgTemp = Math.round(tArr.reduce((a,b)=>a+b,0)/tArr.length);
-  const avgWind = Math.round(wArr.reduce((a,b)=>a+b,0)/wArr.length);
-
-  // Väderprosa
-  let weatherMsg = "";
-  if (isClearNow && willBeCloudy && firstCloudyHour) {
-    weatherMsg = `The sky is currently clear, but clouds are expected to increase from ${firstCloudyHour}:00.`;
-  } else if (isClearNow) {
-    weatherMsg = "Clear sky expected throughout the next 6 hours. Excellent visibility!";
-  } else if (isCloudyNow && willBeClear && firstClearHour) {
-    weatherMsg = `Cloudy at the moment, but clearing is expected from ${firstClearHour}:00.`;
-  } else if (isCloudyNow) {
-    weatherMsg = "Heavy clouds are expected for the next 6 hours.";
-  } else if (cArr.some(c => c > cloudThresholdClear && c < cloudThresholdCloudy)) {
-    weatherMsg = "Partly cloudy skies are expected over the next 6 hours.";
-  } else {
-    weatherMsg = "Mixed cloud cover expected.";
+  const current = getLocation();
+  if (lat !== current.lat || lon !== current.lon || tz !== current.tz) return;
+  const cloud = weather.cloudArr.slice(0, 6);
+  const hours = weather.hourArr.slice(0, 6);
+  const messages = [];
+  const clear = value => Number.isFinite(value) && value <= 20;
+  const cloudy = value => Number.isFinite(value) && value >= 70;
+  if (cloudy(cloud[0]) || clear(cloud[0])) {
+    const startsClear = clear(cloud[0]);
+    const next = cloud.findIndex(startsClear ? cloudy : clear);
+    const first = startsClear ? 'Clear sky' : 'Heavy cloud cover';
+    const change = startsClear ? 'cloud cover increases' : 'clearing expected';
+    messages.push(next >= 0 ? `${first}, with ${change} from ${hours[next]}.` : `${first} in the first forecast hour.`);
+  } else if (Number.isFinite(cloud[0])) {
+    messages.push('Partly cloudy in the first forecast hour.');
   }
-  if (isFogNow && willBeFog && firstFogHour) {
-    weatherMsg += ` Fog currently reduces visibility and may persist.`;
-  } else if (isFogNow) {
-    weatherMsg += " Fog currently reduces visibility.";
-  } else if (willBeFog && firstFogHour) {
-    weatherMsg += ` Fog may develop later, especially from ${firstFogHour}:00.`;
+  const limited = weather.limitedVisibility.slice(0, 6).indexOf(true);
+  if (limited >= 0) messages.push(`Low visibility or fog forecast from ${hours[limited]}.`);
+  function average(values) {
+    const valid = values.slice(0, 6).filter(Number.isFinite);
+    return valid.length ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : null;
   }
-  weatherMsg += ` Avg. temp: ${avgTemp}°C, avg. wind: ${avgWind} m/s.`;
-  weatherMsg += ` (Forecast: ${hArr[0]}:00–${hArr.at(-1)}:00)`;
-
-  // Mån-data
-  let moonMsg = "";
-  if (moon) {
-    moonMsg = `Moon phase: ${moon.moon_phase}%`;
-    if (moon.moonrise && moon.moonset) {
-      moonMsg += `. Moonrise: ${moon.moonrise}, moonset: ${moon.moonset}`;
-    }
-    if (typeof moon.moon_altitude === "number") {
-      moonMsg += `. Max altitude tonight: ${moon.moon_altitude}°`;
-    }
-    if (moon.moon_phase > 80) {
-      moonMsg += " (Full moon or nearly full – may reduce aurora visibility.)";
-    }
-  } else {
-    moonMsg = "Moon info unavailable.";
-  }
-
-  // Spara till globalt state
-  window.latestWeather = {
-    cloud: cArr[0],
-    fog: fArr[0],
-    cloudArr: cArr,
-    fogArr: fArr,
-    tempArr: tArr,
-    dewArr: dArr,
-    windArr: wArr,
-    hourArr: hArr,
-    avgCloud: Math.round(cArr.reduce((a,b)=>a+b,0)/cArr.length),
-    maxCloud: Math.max(...cArr),
-    minCloud: Math.min(...cArr),
-    avgFog: Math.round(fArr.reduce((a,b)=>a+b,0)/fArr.length),
-    maxFog: Math.max(...fArr),
-    minFog: Math.min(...fArr),
-    moon,
-    weatherMsg, moonMsg
-  };
+  const temp = average(weather.tempArr), wind = average(weather.windArr);
+  if (temp !== null) messages.push(`Avg. temp: ${temp}°C.`);
+  if (wind !== null) messages.push(`Avg. wind: ${wind} m/s.`);
+  if (hours.length) messages.push(`(Forecast: ${hours[0]}–${hours.at(-1)})`);
+  const weatherMsg = messages.join(' ');
+  const moon = weather.moon;
+  const moonMsg = Number.isFinite(moon?.moon_phase) ? `Moon illumination: ${moon.moon_phase}%.` : '';
+  window.latestWeather = { ...weather, lat, lon, tz, moon, weatherMsg, moonMsg };
   window.latestWeatherSummary = weatherMsg + " " + moonMsg;
   if (moon && typeof moon.moon_phase === "number") {
-  window.latestMoonIllum = moon.moon_phase;
-  if (typeof updateMoonImage === "function") updateMoonImage();
-}
-
-  if (typeof callback === "function") callback();
+    window.latestMoonIllum = moon.moon_phase;
+    if (typeof updateMoonImage === "function") updateMoonImage();
+  }
 }

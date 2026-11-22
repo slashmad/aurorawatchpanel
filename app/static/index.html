@@ -178,7 +178,7 @@
 		  <span>Aurora/Solar Forecast & Events</span>
 		</div>
 		<div class="conditions-modern-content">
-		  <div id="cond-alert" class="conditions-alert"></div>
+		  <div id="cond-alert" class="conditions-alert"><span role="status">Asking the Sun if it feels like sending us a solar storm…</span></div>
 		  <div class="aurora-conditions-row">
 			<div id="aurora-headsup" class="aurora-headsup-row"></div>
 			<div id="solar-events-list" class="aurora-headsup-row"></div>
@@ -705,7 +705,7 @@
 <!-- ---- Synoptic Overlay ---- -->
 <div id="synoptic-overlay" class="img-overlay">
 	<div class="timelapse-toolbar">
-		<input id="synoptic-date" type="date" style="width:130px;">
+		<input id="synoptic-date" type="date" aria-label="Synoptic map date (UTC)" style="width:130px;">
 		<button id="synoptic-play" title="Play/Pause"><i class="fa fa-play"></i></button>
 		<input id="synoptic-slider" type="range" min="0" max="1" step="1" value="0" style="width:220px;">
 		<button id="synoptic-close" title="Close"><i class="fa fa-xmark"></i></button>

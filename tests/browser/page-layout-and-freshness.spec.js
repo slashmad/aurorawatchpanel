@@ -284,7 +284,7 @@ const SECTION_REQUESTS = {
   noaa: path => path.startsWith('services.swpc.noaa.gov/json/solar-cycle/'),
 };
 const forecastSolarwind = 5; // aurora_forecast always reads 12 h solar wind for the location panel
-const forecastMagnetometer = 2; // ... and the latest KIR + FMI values
+const forecastMagnetometer = 2; // FMI/IMAGE and Swedish network summaries for Sävar
 
 test('narrow screens load hidden sections only when their tab is opened', async ({ page }) => {
   const requests = await startDashboard(page, 412);
